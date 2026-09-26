@@ -1,0 +1,120 @@
+#+title: Split-Radix FFT in SystemVerilog
+#+author: Justin Troth
+#+date: <2026-09-26 Sat 08:16>
+
+An area-efficient, high-throughput Split-Radix FFT (SR-FFT) processor implemented in SystemVerilog. Architectural design inspired by:
+- /"Design and Implementation of Low-Power and High-Throughput Split-Radix FFT Processor"/ (IEEE Xplore: [[https://ieeexplore.ieee.org/document/7451270][7451270]]).
+
+* File Structure
+
+#+begin_src text
+  split_radix_fft/
+    README.org
+    Makefile                    # Root Makefile for build orchestration
+    scripts/
+        run_iv.py               # Unified simulator runner (Icarus / Vivado xsim + Surfer)
+ 
+    src/                        # Synthesizable RTL source files
+        pkg/
+            fft_pkg.sv          # Data types (complex_t), parameters, math functions
+            twiddle_pkg.sv      # Twiddle constants and LUT generation functions
+     
+        math/
+            cmult.sv            # Pipelined complex multiplier (4-mult with rounding & saturation)
+            cadd_sub.sv         # Complex adder/subtractor
+            trivial_rot.sv      # Trivial rotators (x 1, -1, +j, -j) via multiplexers
+     
+        butterfly/
+            bf2_core.sv         # Radix-2 butterfly element
+            bf4_core.sv         # Radix-4 butterfly element
+            sr_butterfly.sv     # Combined Split-Radix (R2/R4) butterfly unit
+     
+        memory/
+            delay_buffer.sv     # Shift register / BRAM-based delay line
+            twiddle_rom.sv      # Quarter-wave symmetric Twiddle ROM
+            reorder_buffer.sv   # Bit-reversal / digit-reversal output buffer
+     
+        control/
+            fft_control_fsm.sv  # Main datapath sequencer / stage tracker
+            twiddle_addr_gen.sv # Stage-dependent twiddle address generator
+     
+        split_radix_fft_top.sv  # Top-level FFT processor with AXI4-Stream I/O
+ 
+    sim/                        # Verification environment
+        tb/
+            tb_cmult.sv         # Self-checking unit testbench for cmult.sv
+            tb_sr_butterfly.sv  # Unit testbench for the split-radix butterfly unit
+            tb_split_radix_fft.sv # Top-level SystemVerilog testbench
+            clk_rst_gen.sv      # Clock and reset utility module
+     
+        model/                  # Golden reference & verification scripts
+            sr_fft_reference.py # Python golden model (floating & fixed-point)
+            gen_stimulus.py     # Stimulus & twiddle table generator
+            evaluate_sqnr.py    # Output checker and SQNR/EVM calculator
+     
+        vectors/                # Generated input/output test vectors (.hex / .txt)
+            stimulus_in.hex
+            golden_out.hex
+     
+        gen/                    # Auto-generated simulation artifacts (git-ignored)
+            vcd/                # Active and backup waveform files (.vcd)
+            vvp/                # Icarus compiled simulation binaries
+            xsim_work/          # Vivado xsim compilation directories
+ 
+    syn/                        # Synthesis constraints and tool scripts
+        constraints/
+            timing.sdc          # Clock constraints and I/O delays
+            vivado_pins.xdc     # FPGA pin and placement constraints (optional)
+     
+        vivado/
+            run_synth.tcl       # Vivado non-project mode synthesis TCL
+            run_impl.tcl        # Vivado place & route TCL
+     
+        dc/
+            synth_dc.tcl        # Synopsys Design Compiler run script
+            .synopsys_dc.setup  # Target library configuration
+     
+        reports/                # Output timing, area, and power reports
+#+end_src
+
+* Simulation Quickstart
+
+Simulations are orchestrated via =scripts/run_iv.py=, which auto-detects the project root and can be invoked from any directory.
+
+** Run Unit Tests (Icarus Verilog + Surfer)
+#+begin_src bash
+  # Compile, simulate, and launch Surfer waveform viewer (default)
+  python3 scripts/run_iv.py sim/tb/tb_cmult.sv
+
+  # Run without dumping waveforms (fast CI/regression mode)
+  python3 scripts/run_iv.py sim/tb/tb_cmult.sv --no-vcd
+#+end_src
+
+** Run with Vivado xsim
+#+begin_src bash
+  python3 scripts/run_iv.py sim/tb/tb_cmult.sv --tool xsim
+#+end_src
+
+* Project Checklist & Roadmap
+
+** Arithmetic & Math Units
+- [X] Fully pipelined 4-multiplier Complex Multiplier (=cmult.sv=)
+  - 3-stage latency, DSP-inferable
+  - Symmetric rounding (+0.5 LSB) and saturation control
+- [X] Self-checking unit testbench for =cmult= with random vector verification
+- [ ] Karatsuba 3-multiplier alternative (=cmult_karatsuba.sv=)
+- [ ] Complex Adder/Subtractor with bit-growth management (=cadd_sub.sv=)
+- [ ] Trivial rotators ($\pm 1, \pm j, \frac{\sqrt{2}}{2}(1 \pm j)$) bypass module
+
+** Split-Radix Core & Datapath
+- [ ] SystemVerilog package (=fft_pkg.sv=) defining fixed-point $Q$-formats and types
+- [ ] Radix-2 / Radix-4 core butterfly elements
+- [ ] Combined L-shaped Split-Radix Butterfly (=sr_butterfly.sv=)
+- [ ] Quarter-wave twiddle factor compressed ROM (=twiddle_rom.sv=)
+- [ ] Pipelined delay line / Single-Path Delay Feedback (SDF) buffers
+
+** Verification & Integration
+- [X] Unified CLI test runner with VCD backup rotation & Surfer integration
+- [ ] Python fixed-point vs. floating-point golden model
+- [ ] Automated SQNR evaluation script
+- [ ] Top-level AXI4-Stream wrapper and bit-reversal reorder buffer
