@@ -97,24 +97,24 @@ Simulations are orchestrated via =scripts/run_iv.py=, which auto-detects the pro
 
 * Project Checklist & Roadmap
 
-** Arithmetic & Math Units
+** Arithmetic & Math Units [4/5]
 - [X] Fully pipelined 4-multiplier Complex Multiplier (=cmult.sv=)
   - 3-stage latency, DSP-inferable
   - Symmetric rounding (+0.5 LSB) and saturation control
 - [X] Self-checking unit testbench for =cmult= with random vector verification
 - [ ] Karatsuba 3-multiplier alternative (=cmult_karatsuba.sv=)
 - [X] Complex Adder/Subtractor with bit-growth management (=cadd_sub.sv=)
-- [ ] Trivial rotators ($\pm 1, \pm j, \frac{\sqrt{2}}{2}(1 \pm j)$) bypass module
+- [X] Trivial rotators ($\pm 1, \pm j, \frac{\sqrt{2}}{2}(1 \pm j)$) bypass module
 
-** Split-Radix Core & Datapath
-- [ ] SystemVerilog package (=fft_pkg.sv=) defining fixed-point $Q$-formats and types
+** Split-Radix Core & Datapath [1/5]
+- [X] SystemVerilog package (=fft_pkg.sv=) defining fixed-point $Q$-formats and types
 - [ ] Radix-2 / Radix-4 core butterfly elements
 - [ ] Combined L-shaped Split-Radix Butterfly (=sr_butterfly.sv=)
 - [ ] Quarter-wave twiddle factor compressed ROM (=twiddle_rom.sv=)
 - [ ] Pipelined delay line / Single-Path Delay Feedback (SDF) buffers
 
-** Verification & Integration
-- [X] Unified CLI test runner with VCD backup rotation & Surfer integration
+** Verification & Integration [0/4]
+- [ ] Unified CLI test runner with VCD backup rotation & Surfer integration
 - [ ] Python fixed-point vs. floating-point golden model
 - [ ] Automated SQNR evaluation script
 - [ ] Top-level AXI4-Stream wrapper and bit-reversal reorder buffer
