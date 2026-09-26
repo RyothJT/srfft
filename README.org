@@ -106,10 +106,10 @@ Simulations are orchestrated via =scripts/run_iv.py=, which auto-detects the pro
 - [X] Complex Adder/Subtractor with bit-growth management (=cadd_sub.sv=)
 - [X] Trivial rotators ($\pm 1, \pm j, \frac{\sqrt{2}}{2}(1 \pm j)$) bypass module
 
-** Split-Radix Core & Datapath [2/5]
+** Split-Radix Core & Datapath [3/5]
 - [X] SystemVerilog package (=fft_pkg.sv=) defining fixed-point $Q$-formats and types
 - [X] Radix-2 / Radix-4 core butterfly elements
-- [ ] Combined L-shaped Split-Radix Butterfly (=sr_butterfly.sv=)
+- [X] Combined L-shaped Split-Radix Butterfly (=sr_butterfly.sv=)
 - [ ] Quarter-wave twiddle factor compressed ROM (=twiddle_rom.sv=)
 - [ ] Pipelined delay line / Single-Path Delay Feedback (SDF) buffers
 
