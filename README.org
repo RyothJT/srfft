@@ -113,8 +113,8 @@ Simulations are orchestrated via =scripts/run_iv.py=, which auto-detects the pro
 - [X] Quarter-wave twiddle factor compressed ROM (=twiddle_rom.sv=)
 - [X] Pipelined delay line / Single-Path Delay Feedback (SDF) buffers
 
-** Control & Sequencing [0/2]
-- [ ] FFT Datapath Controller FSM (=fft_control_fsm.sv=)
+** Control & Sequencing [1/2]
+- [X] FFT Datapath Controller FSM (=fft_control_fsm.sv=)
 - [ ] Stage-dependent Twiddle Factor Address Generator (=twiddle_addr_gen.sv=)
 
 ** Top-Level Integration & Reordering [0/2]
