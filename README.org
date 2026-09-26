@@ -103,7 +103,7 @@ Simulations are orchestrated via =scripts/run_iv.py=, which auto-detects the pro
   - Symmetric rounding (+0.5 LSB) and saturation control
 - [X] Self-checking unit testbench for =cmult= with random vector verification
 - [ ] Karatsuba 3-multiplier alternative (=cmult_karatsuba.sv=)
-- [ ] Complex Adder/Subtractor with bit-growth management (=cadd_sub.sv=)
+- [X] Complex Adder/Subtractor with bit-growth management (=cadd_sub.sv=)
 - [ ] Trivial rotators ($\pm 1, \pm j, \frac{\sqrt{2}}{2}(1 \pm j)$) bypass module
 
 ** Split-Radix Core & Datapath
