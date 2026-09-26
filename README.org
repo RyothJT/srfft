@@ -117,8 +117,8 @@ Simulations are orchestrated via =scripts/run_iv.py=, which auto-detects the pro
 - [X] FFT Datapath Controller FSM (=fft_control_fsm.sv=)
 - [X] Stage-dependent Twiddle Factor Address Generator (=twiddle_addr_gen.sv=)
 
-** Top-Level Integration & Reordering [0/2]
-- [ ] Bit-Reversal / Digit-Reversal Output Reorder Buffer (=reorder_buffer.sv=)
+** Top-Level Integration & Reordering [1/2]
+- [X] Bit-Reversal / Digit-Reversal Output Reorder Buffer (=reorder_buffer.sv=)
 - [ ] Top-Level FFT Wrapper with AXI4-Stream I/O (=split_radix_fft_top.sv=)
   
 
