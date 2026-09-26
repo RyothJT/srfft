@@ -84,12 +84,11 @@ module reorder_buffer #(
   end
 
   // ------------------------------------------------------------------------
-  // Read Control
+  // Read Control (Reads out data in bit-reversed order -> sequential output)
   // ------------------------------------------------------------------------
   logic [ADDR_W-1:0] rd_addr_mapped;
   assign rd_addr_mapped = bit_reverse(rd_ptr);
 
-  // Determine if the current read bank has data ready
   logic current_bank_ready;
   assign current_bank_ready = (rd_bank == 1'b0) ? bank_0_ready : bank_1_ready;
 
@@ -102,21 +101,15 @@ module reorder_buffer #(
     end else begin
       rd_valid <= 1'b0;
 
-      // If reader is idle/finished with current bank, switch to the other if ready
-      if (!current_bank_ready && (rd_ptr == '0)) begin
-        if ((rd_bank == 1'b0 && bank_1_ready) || (rd_bank == 1'b1 && bank_0_ready)) begin
-          rd_bank <= ~rd_bank;
-        end
-      end
-
-      // Perform read if current bank is ready and downstream is ready
+      // If current bank is ready, stream out continuously every clock cycle
       if (current_bank_ready && rd_ready) begin
         rd_valid <= 1'b1;
         if (rd_bank == 1'b0) rd_data <= mem_0[rd_addr_mapped];
         else rd_data <= mem_1[rd_addr_mapped];
 
         if (rd_ptr == FFT_SIZE - 1) begin
-          rd_ptr <= '0;
+          rd_ptr  <= '0;
+          rd_bank <= ~rd_bank;  // Switch ping-pong bank immediately
         end else begin
           rd_ptr <= rd_ptr + 1'b1;
         end

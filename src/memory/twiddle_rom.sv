@@ -23,45 +23,32 @@ module twiddle_rom #(
 
   localparam int ADDR_WIDTH = $clog2(FFT_SIZE);
 
+  logic signed [WIDTH-1:0] cos_rom[0:FFT_SIZE-1];
   logic signed [WIDTH-1:0] sin_rom[0:FFT_SIZE-1];
 
   initial begin
     int  i;
     real angle;
+    real cos_val, sin_val;
+    real max_val;
+
+    max_val = real'((1 << FRAC_BITS) - 1);  // 32767.0 for Q1.15
+
     for (i = 0; i < FFT_SIZE; i = i + 1) begin
-      if (i == 0 || i == FFT_SIZE / 2) begin
-        sin_rom[i] = 16'sh0000;
-      end else if (i == FFT_SIZE / 4) begin
-        sin_rom[i] = 16'sh7FFF;  // +1.0 represented as +32767
-      end else if (i == (3 * FFT_SIZE) / 4) begin
-        sin_rom[i] = 16'sh8001;  // -1.0 represented as -32767 to match symmetric complement range
-      end else begin
-        angle = (2.0 * 3.141592653589793 * real'(i)) / real'(FFT_SIZE);
-        sin_rom[i] = WIDTH
-            '($rtoi($sin(angle) * real'((1 << FRAC_BITS) - 1) + ($sin(angle) >= 0 ? 0.5 : -0.5)));
-      end
+      // Standard forward FFT phase convention: W_N^k = exp(-j * 2 * pi * k / N)
+      angle   = -(2.0 * 3.141592653589793 * real'(i)) / real'(FFT_SIZE);
+
+      cos_val = $cos(angle) * max_val;
+      sin_val = $sin(angle) * max_val;
+
+      // Symmetric rounding & clamping to Q1.15 [-32767, +32767] range
+      if (cos_val >= 0.0) cos_rom[i] = WIDTH'($rtoi(cos_val + 0.5));
+      else cos_rom[i] = WIDTH'($rtoi(cos_val - 0.5));
+
+      if (sin_val >= 0.0) sin_rom[i] = WIDTH'($rtoi(sin_val + 0.5));
+      else sin_rom[i] = WIDTH'($rtoi(sin_val - 0.5));
     end
   end
-
-  function automatic cmplx_t get_twiddle(input logic [ADDR_WIDTH-1:0] k);
-    cmplx_t tw;
-    int idx, cos_idx;
-    begin
-      idx = int'(k);
-      cos_idx = (idx + (FFT_SIZE / 4)) % FFT_SIZE;
-
-      tw.re = sin_rom[cos_idx];
-      tw.im = -sin_rom[idx];
-
-      if (k == 0) begin
-        $display(
-            "[ROM LOOKUP k=0] idx=%0d, cos_idx=%0d, sin_rom[cos_idx]=0x%h (%d), sin_rom[idx]=0x%h (%d)",
-            idx, cos_idx, sin_rom[cos_idx], sin_rom[cos_idx], sin_rom[idx], sin_rom[idx]);
-      end
-
-      return tw;
-    end
-  endfunction
 
   always_ff @(posedge clk) begin
     if (!rst_n) begin
@@ -70,8 +57,10 @@ module twiddle_rom #(
       w3.re <= 16'sh7FFF;
       w3.im <= 16'sh0000;
     end else begin
-      w1 <= get_twiddle(addr1);
-      w3 <= get_twiddle(addr2);
+      w1.re <= cos_rom[addr1];
+      w1.im <= sin_rom[addr1];
+      w3.re <= cos_rom[addr2];
+      w3.im <= sin_rom[addr2];
     end
   end
 
