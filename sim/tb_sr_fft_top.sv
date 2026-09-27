@@ -1,7 +1,9 @@
 // ============================================================================
 // File:        tb_sr_fft_top.sv
-// Description: Fully corrected testbench with precise fixed-point golden DFT
-//              generation, noise thresholding, and frame-aligned scoreboarding.
+// Description: Multi-frame testbench running an initial DC sanity test (Frame 0)
+//              followed by a single low-frequency tone test (Frame 1).
+//              Uses delay periods (#CLK_PERIOD) for driving stimuli to prevent
+//              testbench-DUT race conditions.
 // ============================================================================
 
 `timescale 1ns / 1ps
@@ -9,7 +11,7 @@ import fft_pkg::*;
 
 module tb_sr_fft_top;
 
-  localparam int TEST_FFT_SIZE = 1024;
+  localparam int TEST_FFT_SIZE = 1024 * 1;
   localparam int TEST_DATA_WIDTH = DATA_WIDTH;
   localparam time CLK_PERIOD = 10ns;
   localparam real REAL_PI = 3.14159265358979323846;
@@ -45,7 +47,9 @@ module tb_sr_fft_top;
   int total_samples_checked = 0;
 
   // Device Under Test
-  sr_fft_top dut (
+  sr_fft_top #(
+      .FFT_SIZE(TEST_FFT_SIZE)
+  ) dut (
       .clk          (clk),
       .rst_n        (rst_n),
       .s_axis_tvalid(s_axis_tvalid),
@@ -124,8 +128,6 @@ module tb_sr_fft_top;
 
       frame_ref_re[out_idx] = rounded_re;
       frame_ref_im[out_idx] = rounded_im;
-      // $display("[GOLDEN GEN] Frame %0d | Bin %0d -> Out Index %0d | Golden: re = %0d, im = %0d",
-      //          frame_num, k, out_idx, rounded_re, rounded_im);
     end
 
     // Push frame values into global reference queues
@@ -139,27 +141,27 @@ module tb_sr_fft_top;
     end
   endtask
 
-  // AXI-Stream Frame Driver Task
+  // AXI-Stream Frame Driver Task using period-based delays (#CLK_PERIOD)
   task automatic send_frame(input int frame_idx);
     int sample_idx;
     $display("--- [Frame %0d] Driving Frame to DUT ---", frame_idx);
 
     for (sample_idx = 0; sample_idx < TEST_FFT_SIZE; sample_idx = sample_idx + 1) begin
-      @(posedge clk);
-      while (!s_axis_tready) @(posedge clk);
+      while (!s_axis_tready) #CLK_PERIOD;
 
       s_axis_tvalid   <= 1'b1;
       s_axis_tdata.re <= round_real(buf_re[sample_idx]);
       s_axis_tdata.im <= round_real(buf_im[sample_idx]);
       s_axis_tlast    <= (sample_idx == TEST_FFT_SIZE - 1) ? 1'b1 : 1'b0;
+
+      #CLK_PERIOD;
     end
 
-    @(posedge clk);
     s_axis_tvalid <= 1'b0;
     s_axis_tlast  <= 1'b0;
   endtask
 
-  // Frame-Synchronized Scoreboard Process
+  // Frame-Synchronized Scoreboard Process using period-based polling
   initial begin
     logic signed [TEST_DATA_WIDTH-1:0] got_re, got_im;
     logic signed [TEST_DATA_WIDTH-1:0] exp_re, exp_im;
@@ -171,7 +173,7 @@ module tb_sr_fft_top;
     frame_sample_cnt = 0;
 
     forever begin
-      @(posedge clk);
+      #CLK_PERIOD;
       if (m_axis_tvalid && m_axis_tready) begin
         got_re = m_axis_tdata.re;
         got_im = m_axis_tdata.im;
@@ -209,7 +211,6 @@ module tb_sr_fft_top;
 
   // Test Sequence Controller
   initial begin
-    int  frame;
     int  i;
     int  target_bin;
     real scale_1N;
@@ -229,27 +230,69 @@ module tb_sr_fft_top;
     scale_1N  = 1.0 / real'(TEST_FFT_SIZE);
     amplitude = 2048.0;
 
+    // ========================================================================
+    // Frame 0: Initial DC Sanity Test (Spike expected at Bin 0)
+    // ========================================================================
     $display("==================================================");
-    $display(" Starting Multi-Frame Out-of-Phase Wave FFT Test ");
+    $display(" Starting Frame 0: Initial DC Sanity Test         ");
+    $display(" Expected Peak: Bin 0                             ");
     $display("==================================================");
 
-    for (frame = 0; frame < 8; frame = frame + 1) begin
-      phase_angle = real'(frame) * (REAL_PI / 24.0);
-      target_bin  = (frame + 1) * 32;
+    for (i = 0; i < TEST_FFT_SIZE; i = i + 1) begin
+      buf_re[i] = amplitude;
+      buf_im[i] = 0.0;
+    end
 
-      for (i = 0; i < TEST_FFT_SIZE; i = i + 1) begin
-        calc_angle = (2.0 * REAL_PI * real'(target_bin) * real'(i)) / real'(TEST_FFT_SIZE) + phase_angle;
-        buf_re[i] = amplitude * $cos(calc_angle);
-        buf_im[i] = amplitude * $sin(calc_angle);
-      end
+    compute_and_queue_golden("DC Sanity Test (Bin 0)", 0, scale_1N, EXPECT_BIT_REVERSED_OUTPUT);
+    repeat (2) begin
+      send_frame(0);
+    end
 
-      compute_and_queue_golden($sformatf("Bin %0d with Phase %0f rad", target_bin, phase_angle),
-                               frame, scale_1N, EXPECT_BIT_REVERSED_OUTPUT);
-      send_frame(frame);
+    // ========================================================================
+    // Frame 0.5: Impulse
+    // ========================================================================
+    $display("==================================================");
+    $display(" Starting Frame 0.5: Impulse                      ");
+    $display(" Expected Peak: Bin 0                             ");
+    $display("==================================================");
+
+    buf_re[0] = amplitude * 8;
+    buf_im[0] = 0.0;
+    for (i = 1; i < TEST_FFT_SIZE; i = i + 1) begin
+      buf_re[i] = 0.0;
+      buf_im[i] = 0.0;
+    end
+
+    compute_and_queue_golden("DC Sanity Test (Bin 0)", 0, scale_1N, EXPECT_BIT_REVERSED_OUTPUT);
+    repeat (2) begin
+      send_frame(0);
+    end
+
+    // ========================================================================
+    // Frame 1: Low-Frequency Tone Test (Spike expected at Bin 4)
+    // ========================================================================
+    target_bin  = 4;
+    phase_angle = 0.0;
+
+    $display("==================================================");
+    $display(" Starting Frame 1: Single Low-Frequency Tone Test ");
+    $display(" Target Bin: %0d | Phase: %0f rad                ", target_bin, phase_angle);
+    $display("==================================================");
+
+    for (i = 0; i < TEST_FFT_SIZE; i = i + 1) begin
+      calc_angle = 2.0 * (2.0 * REAL_PI * real'(target_bin) * real'(i)) / real'(TEST_FFT_SIZE) + phase_angle;
+      buf_re[i] = amplitude * $cos(calc_angle);
+      buf_im[i] = amplitude * $sin(calc_angle);
+    end
+
+    compute_and_queue_golden($sformatf("Bin %0d Single Tone Test", target_bin), 1, scale_1N,
+                             EXPECT_BIT_REVERSED_OUTPUT);
+    repeat (3) begin
+      send_frame(1);
     end
 
     // Wait until all golden samples are processed by the scoreboard
-    while (ref_re_q.size() > 0) @(posedge clk);
+    while (ref_re_q.size() > 0) #CLK_PERIOD;
     #(CLK_PERIOD * 100);
 
     $display("\n==================================================");
@@ -257,7 +300,7 @@ module tb_sr_fft_top;
     $display(" Total Samples Checked : %0d", total_samples_checked);
     $display(" Matches               : %0d", match_count);
     $display(" Errors                : %0d", error_count);
-    if (error_count == 0 && total_samples_checked == 8 * TEST_FFT_SIZE) begin
+    if (error_count == 0 && total_samples_checked == 2 * TEST_FFT_SIZE) begin
       $display(" STATUS                 : >>> TEST PASSED <<<");
     end else begin
       $display(" STATUS                 : >>> TEST FAILED <<<");

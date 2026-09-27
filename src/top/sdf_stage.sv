@@ -1,7 +1,6 @@
 // ============================================================================
 // File:        sdf_stage.sv
-// Description: Single-Path Delay Feedback (SDF) pipeline stage combining
-//              a feedback multiplexer, delay buffer, and butterfly core.
+// Description: Single-Path Delay Feedback (SDF) pipeline stage.
 // ============================================================================
 
 `timescale 1ns / 1ps
@@ -10,7 +9,7 @@ import fft_pkg::*;
 module sdf_stage #(
     parameter int STAGE_DEPTH = 512,
     parameter bit HAS_TWIDDLE = 1'b1,
-    parameter int SCALE = 1'b1
+    parameter bit SCALE       = 1'b1
 ) (
     input logic   clk,
     input logic   rst_n,
@@ -28,8 +27,7 @@ module sdf_stage #(
   logic   bf_valid;
   cmplx_t bf_y0, bf_y1;
 
-  // Feedback Mux: During CALC mode, loop bf_y1 back into delay buffer.
-  // During LOAD mode, feed incoming data_in into delay buffer.
+  // Feedback Mux: LOAD feeds data_in into delay; CALC feeds butterfly feedback (bf_y1) into delay
   assign delay_din = sdf_mode ? bf_y1 : data_in;
 
   delay_buffer #(
@@ -52,16 +50,25 @@ module sdf_stage #(
   ) u_bf (
       .clk      (clk),
       .rst_n    (rst_n),
-      .valid_in (valid_in),
+      .valid_in (valid_in && sdf_mode),  // Butterfly computes only during CALC phase
       .valid_out(bf_valid),
-      .a        (delay_dout),  // Older sample from delay buffer
-      .b        (data_in),     // Current incoming sample
+      .a        (delay_dout),
+      .b        (data_in),
       .w        (tw_w),
-      .y0       (bf_y0),       // Forward path to next stage
-      .y1       (bf_y1)        // Feedback path
+      .y0       (bf_y0),
+      .y1       (bf_y1)
   );
 
-  assign valid_out = bf_valid;
-  assign data_out  = bf_y0;
+  // Output Mux: LOAD outputs delayed data; CALC outputs butterfly y0
+  assign data_out = sdf_mode ? bf_y0 : delay_dout;
+
+  // FIX: valid_out must be high whenever valid_in is high, across BOTH phases!
+  logic valid_out_r;
+  always_ff @(posedge clk) begin
+    if (!rst_n) valid_out_r <= 1'b0;
+    else valid_out_r <= valid_in;
+  end
+
+  assign valid_out = valid_out_r;
 
 endmodule
