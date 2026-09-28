@@ -1,17 +1,16 @@
 // ============================================================================
-// File:        bf4_core.sv
-// Description: Radix-4 Single-Path Delay Feedback (R4SDF) Butterfly Core
-//              - Correct local frame masking for 4x frequency acceleration per stage
-//              - Synchronized delay strides (D1, D2, D3)
-//              - Pipeline-aligned multiplier and direct sum paths
-//              - Support for Baseline and ROM-based twiddle generation
+// File:        bfsr_core.sv
+// Description: Split-Radix Single-Path Delay Feedback (SDF) Butterfly Core
+//              - Corrected SDF commutator alignment and delay line depths
+//              - Continuous data flow without empty output slots
+//              - Golden ROM / Baseline twiddle selection retained
 // ============================================================================
 
 `timescale 1ns / 1ps
 
-module bf4_core #(
-    parameter int N_FFT           = 64,                   // Total FFT size (power of 4)
-    parameter int STAGE           = 0,                    // Stage index (0 to STAGES_R4-1)
+module bfsr_core #(
+    parameter int N_FFT           = 64,                   // Total FFT size
+    parameter int STAGE           = 0,                    // Stage index
     parameter int DATA_WIDTH      = fft_pkg::DATA_WIDTH,
     parameter bit USE_ROM_TWIDDLE = 1'b1                  // 0: Baseline real dynamic, 1: ROM-based
 ) (
@@ -29,15 +28,12 @@ module bf4_core #(
 
   import fft_pkg::*;
 
-  localparam int STAGES_R4 = $clog2(N_FFT) / 2;
   localparam int DELAY = N_FFT >> (2 * (STAGE + 1));  // Stride D = N / 4^(STAGE+1)
-  localparam int STAGE_FRAME = 4 * DELAY;  // Local sub-transform frame size
-  localparam int SHIFT_BIT = $clog2(DELAY);  // Local stride bit offset
+  localparam int SHIFT_BIT = $clog2(DELAY);
   localparam real TWO_PI = 6.283185307179586;
 
   // ----------------------------------------------------------------
   // Stage Local Sample Counter
-  // Resets per local STAGE_FRAME to enforce frequency acceleration
   // ----------------------------------------------------------------
   logic [$clog2(N_FFT)-1:0] stg_cnt;
 
@@ -54,7 +50,7 @@ module bf4_core #(
   assign state = (stg_cnt >> SHIFT_BIT) & 2'b11;
 
   // ----------------------------------------------------------------
-  // Single-Path Delay Feedback Buffers (3 Strides of DELAY)
+  // Single-Path Delay Feedback Buffers (Cascaded 1*DELAY Units)
   // ----------------------------------------------------------------
   cmplx_t d1_in, d1_out;
   cmplx_t d2_in, d2_out;
@@ -94,7 +90,8 @@ module bf4_core #(
   );
 
   // ----------------------------------------------------------------
-  // Butterfly Input Wiring & Radix-4 Math Combiner
+  // Split-Radix Intermediate Butterfly Logic
+  // A = d3_out (x0), B = d2_out (x1), C = d1_out (x2), D = in_data (x3)
   // ----------------------------------------------------------------
   cmplx_t bf_a, bf_b, bf_c, bf_d;
   cmplx_t sum_0, sum_1, sum_2, sum_3;
@@ -103,49 +100,63 @@ module bf4_core #(
     bf_a = d3_out;  // Oldest sample (delayed by 3*D)
     bf_b = d2_out;  // Delayed by 2*D
     bf_c = d1_out;  // Delayed by 1*D
-    bf_d = in_data;  // Current input sample (0 delay)
+    bf_d = in_data;  // Current input sample
 
-    // S0 = A + B + C + D
+    // y0 = (A + C) + (B + D)  [Direct sum - emitted immediately in state 11]
     sum_0.re = (bf_a.re + bf_c.re) + (bf_b.re + bf_d.re);
     sum_0.im = (bf_a.im + bf_c.im) + (bf_b.im + bf_d.im);
 
-    // S1 = (A - C) - j*(B - D)
-    sum_1.re = (bf_a.re - bf_c.re) + (bf_b.im - bf_d.im);
-    sum_1.im = (bf_a.im - bf_c.im) - (bf_b.re - bf_d.re);
-
-    // S2 = (A + C) - (B + D)
+    // y1 = (A + C) - (B + D)  [Bypasses twiddle multiplication]
     sum_2.re = (bf_a.re + bf_c.re) - (bf_b.re + bf_d.re);
     sum_2.im = (bf_a.im + bf_c.im) - (bf_b.im + bf_d.im);
 
-    // S3 = (A - C) + j*(B - D)
+    // z1 = (A - C) - j*(B - D) [To be rotated by W_N^k]
+    sum_1.re = (bf_a.re - bf_c.re) + (bf_b.im - bf_d.im);
+    sum_1.im = (bf_a.im - bf_c.im) - (bf_b.re - bf_d.re);
+
+    // z3 = (A - C) + j*(B - D) [To be rotated by W_N^(3k)]
     sum_3.re = (bf_a.re - bf_c.re) - (bf_b.im - bf_d.im);
     sum_3.im = (bf_a.im - bf_c.im) + (bf_b.re - bf_d.re);
   end
 
   // ----------------------------------------------------------------
-  // SDF Commutator Input Routing Logic
+  // SDF Commutator Routing Logic
   // ----------------------------------------------------------------
   always_comb begin
     case (state)
-      // States 00, 01, 10: Shift incoming samples into delay line
+      // States 00, 01, 10: Shift inputs through cascaded DELAY stages
       2'b00, 2'b01, 2'b10: begin
         d1_in = in_data;
         d2_in = d1_out;
         d3_in = d2_out;
       end
 
-      // State 11: Active Butterfly Calculation - Feed unrotated difference outputs into delay lines
+      // State 11: Active Butterfly Calculation
+      // Load z3 into d3, y1 into d2, z1 into d1
       2'b11: begin
-        d1_in = sum_1;
-        d2_in = sum_2;
-        d3_in = sum_3;
+        d1_in = sum_1;  // z1 branch
+        d2_in = sum_2;  // y1 branch
+        d3_in = sum_3;  // z3 branch
       end
     endcase
   end
 
   // ----------------------------------------------------------------
-  // Method 1: Dynamic Twiddle Factor Generator (Baseline)
-  // Scaled relative to local stage frame indices
+  // Active Path Operand Selection
+  // ----------------------------------------------------------------
+  cmplx_t mult_operand_a;
+
+  always_comb begin
+    case (state)
+      2'b00:   mult_operand_a = d1_out;  // z1 pops out after 1*D delay
+      2'b01:   mult_operand_a = d2_out;  // y1 pops out after 2*D delay
+      2'b10:   mult_operand_a = d3_out;  // z3 pops out after 3*D delay
+      default: mult_operand_a = '0;
+    endcase
+  end
+
+  // ----------------------------------------------------------------
+  // Method 1: Dynamic Split-Radix Twiddle Factor Generator (Baseline)
   // ----------------------------------------------------------------
   cmplx_t twiddle_baseline;
 
@@ -154,22 +165,21 @@ module bf4_core #(
   //   real angle;
 
   //   case (state)
-  //     2'b10:   sub_idx = 1;  // S1 exiting D3 during state 10
-  //     2'b01:   sub_idx = 2;  // S2 exiting D3 during state 01
-  //     2'b00:   sub_idx = 3;  // S3 exiting D3 during state 00
+  //     2'b00:   sub_idx = 1;  // W_N^k for z1 branch
+  //     2'b01:   sub_idx = 0;  // Unity twiddle for y1 (bypass)
+  //     2'b10:   sub_idx = 3;  // W_N^(3k) for z3 branch
   //     default: sub_idx = 0;
   //   endcase
 
-  //   // k index cycles over the stage-local frame duration (DELAY)
   //   k = (stg_cnt & (DELAY - 1)) * sub_idx * (1 << (2 * STAGE));
   //   angle = -TWO_PI * real'(k) / real'(N_FFT);
 
-  //   twiddle_baseline.re = $rtoi($cos(angle) * 32767.0);
-  //   twiddle_baseline.im = $rtoi($sin(angle) * 32767.0);
+  //   twiddle_baseline.re = $rtoi($cos(angle) * real'((1 << (DATA_WIDTH - 1)) - 1));
+  //   twiddle_baseline.im = $rtoi($sin(angle) * real'((1 << (DATA_WIDTH - 1)) - 1));
   // end
 
   // ----------------------------------------------------------------
-  // Method 2: ROM-Based Twiddle Factor Generation (R4 Lookahead)
+  // Method 2: ROM-Based Twiddle Factor Generation
   // ----------------------------------------------------------------
   logic [$clog2(N_FFT)-1:0] rom_addr1, rom_addr2;
   cmplx_t twiddle_rom_w1, twiddle_rom_w3;
@@ -199,15 +209,17 @@ module bf4_core #(
       .w3   (twiddle_rom_w3)
   );
 
-  // Mux ROM output based on active state sub-index (W^1k, W^2k, W^3k)
+  // Mux ROM output based on active state sub-index
   cmplx_t twiddle_rom_selected;
 
   always_comb begin
     case (state)
-      2'b10:   twiddle_rom_selected = twiddle_rom_w1;  // W^1k
-      2'b01:   twiddle_rom_selected = twiddle_rom_w1;  // W^2k calculated by lookahead stride
-      2'b00:   twiddle_rom_selected = twiddle_rom_w3;  // W^3k
-      default: twiddle_rom_selected = twiddle_rom_w1;
+      2'b00: twiddle_rom_selected = twiddle_rom_w1;  // W^1k for z1 branch
+      2'b10: twiddle_rom_selected = twiddle_rom_w3;  // W^3k for z3 branch
+      default: begin  // States 01 and 11 (y1 bypass & sum_0 direct emit)
+        twiddle_rom_selected.re = (1 << (DATA_WIDTH - 1)) - 1;  // Unity real (+1 in Q0.15)
+        twiddle_rom_selected.im = '0;  // Unity imag (0)
+      end
     endcase
   end
 
@@ -215,23 +227,11 @@ module bf4_core #(
   // Twiddle Selection Multiplexer
   // ----------------------------------------------------------------
   cmplx_t twiddle;
-  wire signed [15:0] diff_re;
-  wire signed [15:0] diff_im;
-  reg signed [31:0] diff_re_sum;
-  reg signed [31:0] diff_im_sum;
+  wire [DATA_WIDTH-1:0] diff_re;
+  wire [DATA_WIDTH-1:0] diff_im;
 
   assign diff_re = twiddle_rom_selected.re - twiddle_baseline.re;
   assign diff_im = twiddle_rom_selected.im - twiddle_baseline.im;
-
-  always_ff @(posedge clk) begin
-    if (!rst_n) begin
-      diff_re_sum <= 0;
-      diff_im_sum <= 0;
-    end else begin
-      diff_re_sum <= diff_re_sum + diff_re;
-      diff_im_sum <= diff_im_sum + diff_im;
-    end
-  end
 
   always_comb begin
     if (USE_ROM_TWIDDLE) begin
@@ -243,7 +243,6 @@ module bf4_core #(
 
   // ----------------------------------------------------------------
   // Complex Multiplier on Delayed Feedback Path (3 Cycles Latency)
-  // Multiplies difference path samples exiting d3_out
   // ----------------------------------------------------------------
   cmplx_t twid_mult_out;
   logic   mult_valid;
@@ -257,8 +256,8 @@ module bf4_core #(
       .rst_n    (rst_n),
       .valid_in (in_valid),
       .valid_out(mult_valid),
-      .a_re     (d3_out.re),
-      .a_im     (d3_out.im),
+      .a_re     (mult_operand_a.re),
+      .a_im     (mult_operand_a.im),
       .b_re     (twiddle.re),
       .b_im     (twiddle.im),
       .p_re     (twid_mult_out.re),
@@ -266,7 +265,7 @@ module bf4_core #(
   );
 
   // ----------------------------------------------------------------
-  // Delay Unrotated Sum Path (sum_0) and Control Signals by 3 Cycles
+  // Pipeline Delay Alignments (3 Cycles Latency)
   // ----------------------------------------------------------------
   cmplx_t sum_0_delayed;
   logic [1:0] state_delayed;
@@ -295,8 +294,6 @@ module bf4_core #(
 
   // ----------------------------------------------------------------
   // Stage Synchronous Output Mux (Pipeline Aligned)
-  // state_delayed = 11 -> Output unrotated sum_0_delayed
-  // state_delayed = 00, 01, 10 -> Output rotated feedback outputs (twid_mult_out)
   // ----------------------------------------------------------------
   always_comb begin
     if (state_delayed == 2'b11) begin
@@ -307,7 +304,7 @@ module bf4_core #(
   end
 
   // ----------------------------------------------------------------
-  // Propagate Valid Signal Delayed by 3 Clock Cycles
+  // Valid Signal Propagation
   // ----------------------------------------------------------------
   delay_buffer #(
       .DEPTH(3),
