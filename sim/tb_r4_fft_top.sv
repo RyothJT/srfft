@@ -1,13 +1,13 @@
 // ============================================================================
-// File:        tb_r2_fft_top.sv
-// Description: Fully Parameterized Self-Checking Testbench for r2_fft_top
+// File:        tb_r4_fft_top.sv
+// Description: Fully Parameterized Self-Checking Testbench for r4_fft_top
 //              Scales dynamically to any N_FFT power of 2.
 // Compatible with Icarus Verilog (iverilog -g2012)
 // ============================================================================
 
 `timescale 1ns / 1ps
 
-module tb_r2_fft_top;
+module tb_r4_fft_top;
 
   import fft_pkg::*;
 
@@ -39,11 +39,11 @@ module tb_r2_fft_top;
   // VCD Dump Section
   initial begin
     $dumpfile("sim/gen/vcd/current.vcd");
-    $dumpvars(0, tb_r2_fft_top);
+    $dumpvars(0, tb_r4_fft_top);
   end
 
   // Unit Under Test
-  r2_fft_top #(
+  r4_fft_top #(
       .N_FFT(N_FFT),
       .DATA_WIDTH(DATA_WIDTH)
   ) uut (
@@ -80,7 +80,7 @@ module tb_r2_fft_top;
   // Helper Function: Compute Discrete Sine Wave Sample
   function automatic logic signed [DATA_WIDTH-1:0] get_cosine_sample(int sample_num);
     real angle;
-    angle = (TWO_PI * SINE_CYCLES * sample_num) / N_FFT + TWO_PI/4;
+    angle = (TWO_PI * SINE_CYCLES * sample_num) / N_FFT + TWO_PI / 4;
     return $rtoi(SINE_MAG * $sin(angle));
   endfunction
 

@@ -1,14 +1,14 @@
 // ============================================================================
-// File:        r2_fft_top.sv
-// Description: Parameterized Radix-2 SDF Pipelined FFT Processor
-//              Integrated with Stage Twiddle Multipliers (cmult)
+// File:        r4_fft_top.sv
+// Description: Parameterized Radix-4 SDF Pipelined FFT Processor Top Module
 // ============================================================================
 
 `timescale 1ns / 1ps
 
-module r2_fft_top #(
-    parameter int N_FFT      = 1024,                  // FFT point size (power of 2)
-    parameter int DATA_WIDTH = fft_pkg::DATA_WIDTH
+module r4_fft_top #(
+    parameter int N_FFT      = 1024,                   // FFT point size (power of 4: 16, 64, 256...)
+    parameter int DATA_WIDTH = fft_pkg::DATA_WIDTH,
+    parameter int PIPELINE   = 1
 ) (
     input logic clk,
     input logic rst_n,
@@ -23,21 +23,18 @@ module r2_fft_top #(
 
   import fft_pkg::*;
 
-  localparam int STAGES = $clog2(N_FFT);
-  localparam int NUM_BOUNDS = STAGES + 1;
+  localparam int STAGES_R4 = $clog2(N_FFT) / 2;  // Log4(N_FFT) stages
+  localparam int STG_LATENCY = PIPELINE + 3;
+  localparam int NUM_BOUNDS = STAGES_R4 + 1;
 
   logic [(NUM_BOUNDS * 2 * DATA_WIDTH)-1 : 0] stage_data_flat;
   logic [                   NUM_BOUNDS-1 : 0] stage_valid_flat;
 
-  // Connect top-level input to internal pipeline tracking
   assign stage_valid_flat[0] = in_valid;
 
   genvar s;
   generate
-    for (s = 0; s < STAGES; s = s + 1) begin : gen_stages
-      // ----------------------------------------------------------------
-      // Input Data Selection
-      // ----------------------------------------------------------------
+    for (s = 0; s < STAGES_R4; s = s + 1) begin : gen_r4_stages
       cmplx_t stg_in_data;
       logic   stg_in_valid;
 
@@ -51,14 +48,12 @@ module r2_fft_top #(
 
       cmplx_t stg_out_data;
 
-      // ----------------------------------------------------------------
-      // Radix-2 Butterfly Core Instance
-      // ----------------------------------------------------------------
-      bf2_core #(
+      // Radix-4 Butterfly Instance
+      bf4_core #(
           .N_FFT(N_FFT),
           .STAGE(s),
           .DATA_WIDTH(DATA_WIDTH)
-      ) u_bf2_core (
+      ) u_bf4_core (
           .clk      (clk),
           .rst_n    (rst_n),
           .in_valid (stg_in_valid),
@@ -72,16 +67,14 @@ module r2_fft_top #(
   endgenerate
 
   // ------------------------------------------------------------------------
-  // Latency Alignment & Reorder Buffer Integration
-  // Total Pipeline Latency = (N_FFT - 1) + (3 * STAGES)
+  // Pipeline Alignment & Reorder Buffer Integration
   // ------------------------------------------------------------------------
   logic   pipe_valid;
   cmplx_t pipe_data;
-
   logic   delayed_valid;
 
   delay_buffer #(
-      .DEPTH((N_FFT - 1) + (3 * STAGES)),
+      .DEPTH((N_FFT - 1) + (STG_LATENCY * STAGES_R4)),
       .DATA_WIDTH(1)
   ) u_valid_delay (
       .clk   (clk),
@@ -97,11 +90,10 @@ module r2_fft_top #(
       pipe_data  <= '0;
     end else begin
       pipe_valid <= delayed_valid;
-      pipe_data  <= stage_data_flat[STAGES*(2*DATA_WIDTH)-1-:(2*DATA_WIDTH)];
+      pipe_data  <= stage_data_flat[STAGES_R4*(2*DATA_WIDTH)-1-:(2*DATA_WIDTH)];
     end
   end
 
-  // Bit-Reversal Reorder Buffer Instance
   reorder_buffer #(
       .FFT_SIZE  (N_FFT),
       .DATA_WIDTH(DATA_WIDTH)

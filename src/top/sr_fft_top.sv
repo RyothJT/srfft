@@ -1,199 +1,140 @@
 // ============================================================================
 // File:        sr_fft_top.sv
-// Description: Top-level wrapper for the Single-Path Delay Feedback (SDF) 
-//              Split-Radix FFT processor with fully chained multi-stage pipeline.
+// Description: Parameterized Split-Radix (R2/R4 Hybrid) SDF Pipelined 
+//              FFT Processor Top Module
 // ============================================================================
 
 `timescale 1ns / 1ps
-import fft_pkg::*;
 
 module sr_fft_top #(
-    parameter int FFT_SIZE = 256,  // FFT point size
-    parameter int DATA_WIDTH = fft_pkg::DATA_WIDTH
-    // parameter int DATA_WIDTH = DATA_WIDTH  // Complex data width
+    parameter int N_FFT = 1024,  // FFT point size (Power of 2: 32, 64, 128, 256...)
+    parameter int DATA_WIDTH = fft_pkg::DATA_WIDTH,
+    parameter int PIPELINE = 1
 ) (
     input logic clk,
     input logic rst_n,
 
-    // Input Sink Interface (AXI4-Stream Slave with TLAST framing)
-    input  logic   s_axis_tvalid,
-    output logic   s_axis_tready,
-    input  cmplx_t s_axis_tdata,
-    input  logic   s_axis_tlast,
+    // Streaming Data Interface
+    input logic            in_valid,
+    input fft_pkg::cmplx_t in_data,
 
-    // Output Source Interface (AXI4-Stream Master with TLAST framing)
-    output logic   m_axis_tvalid,
-    input  logic   m_axis_tready,
-    output cmplx_t m_axis_tdata,
-    output logic   m_axis_tlast
+    output logic            out_valid,
+    output fft_pkg::cmplx_t out_data
 );
 
-  // localparam int STAGE_COUNT = 12;
-  localparam int STAGE_COUNT = $clog2(FFT_SIZE);
+  import fft_pkg::*;
 
-  // Internal Control Signals from FSM
-  logic fsm_sdf_mode;
-  logic fsm_stage_active;
-  logic fsm_valid_out;
-  logic fsm_ready_out;
+  // Split-Radix decomposes N into Radix-2 for the first stage (if log2(N) is odd)
+  // followed by paired Radix-4 stages, or hybrid R2/R4 stages.
+  localparam int LOG2_N = $clog2(N_FFT);
+  localparam int IS_ODD_R2 = LOG2_N % 2;  // 1 if requiring initial Radix-2 stage
+  localparam int NUM_R4_STG = LOG2_N / 2;  // Number of equivalent Radix-4 stages
+  localparam int NUM_STAGES = NUM_R4_STG + IS_ODD_R2;
 
-  fft_control_fsm #(
-      .FFT_SIZE(FFT_SIZE)
-  ) u_control_fsm (
-      .clk         (clk),
-      .rst_n       (rst_n),
-      .valid_in    (s_axis_tvalid),
-      .ready_in    (m_axis_tready),
-      .valid_out   (fsm_valid_out),
-      .ready_out   (fsm_ready_out),
-      .sdf_mode    (fsm_sdf_mode),
-      .stage_active(fsm_stage_active)
-  );
+  localparam int STG_LATENCY = PIPELINE + 3;
+  localparam int NUM_BOUNDS = NUM_STAGES + 1;
 
-  assign s_axis_tready = fsm_ready_out;
+  logic [(NUM_BOUNDS * 2 * DATA_WIDTH)-1 : 0] stage_data_flat;
+  logic [                   NUM_BOUNDS-1 : 0] stage_valid_flat;
 
-  // Multi-Stage Pipeline Interconnect Arrays
-  logic   [0:STAGE_COUNT] stage_vld;
-  cmplx_t [0:STAGE_COUNT] stage_data;
+  assign stage_valid_flat[0] = in_valid;
+  assign stage_data_flat[(2*DATA_WIDTH)-1-:(2*DATA_WIDTH)] = in_data;
 
-  assign stage_vld[0]  = s_axis_tvalid && s_axis_tready;
-  assign stage_data[0] = s_axis_tdata;
-
-  // Expose the FSM sample counter or replicate a frame sample counter driven by valid_in
-  logic [$clog2(FFT_SIZE)-1:0] frame_sample_cnt;
-
-  always_ff @(posedge clk) begin
-    if (!rst_n) begin
-      frame_sample_cnt <= '0;
-    end else if (s_axis_tvalid && s_axis_tready) begin
-      frame_sample_cnt <= frame_sample_cnt + 1'b1;
-    end
-  end
-
-  // Generate loop chaining all M SDF stages
+  // ------------------------------------------------------------------------
+  // Split-Radix Pipelined Stage Generation
+  // ------------------------------------------------------------------------
   genvar s;
   generate
-    for (s = 0; s < STAGE_COUNT; s = s + 1) begin : gen_sdf_stages
-      localparam int STAGE_BLOCK = FFT_SIZE >> s;  // e.g., 1024, 512, 256...
-      localparam int STAGE_DELAY = STAGE_BLOCK / 2;  // e.g., 512, 256, 128...
+    for (s = 0; s < NUM_STAGES; s = s + 1) begin : gen_sr_stages
+      cmplx_t stg_in_data;
+      logic   stg_in_valid;
 
-      // Self-synchronizing stage counter (Runs continuously modulo STAGE_BLOCK on valid data)
-      logic [$clog2(FFT_SIZE)-1:0] stage_cnt;
-      logic                        stage_sdf_mode;
+      assign stg_in_data  = stage_data_flat[s*(2*DATA_WIDTH)+:(2*DATA_WIDTH)];
+      assign stg_in_valid = stage_valid_flat[s];
 
-      always_ff @(posedge clk) begin
-        if (!rst_n) begin
-          stage_cnt <= '0;
-        end else if (stage_vld[s]) begin
-          if (stage_cnt == STAGE_BLOCK - 1) stage_cnt <= '0;
-          else stage_cnt <= stage_cnt + 1'b1;
-        end
+      cmplx_t stg_out_data;
+      logic   stg_out_valid;
+
+      // Stage 0 is Radix-2 if log2(N_FFT) is odd (e.g., N=32, 128, 512)
+      if ((s == 0) && IS_ODD_R2) begin : g_r2_stage
+        bfsr_core #(
+            .N_FFT(N_FFT),
+            .STAGE(0),
+            .DATA_WIDTH(DATA_WIDTH)
+        ) u_r2_first_stage (
+            .clk      (clk),
+            .rst_n    (rst_n),
+            .in_valid (stg_in_valid),
+            .in_data  (stg_in_data),
+            .out_valid(stg_out_valid),
+            .out_data (stg_out_data)
+        );
+      end else begin : g_r4_or_sr_stage
+        // Subsequent stages process Radix-4 / Split-Radix butterfly operations
+        localparam int R4_STAGE_IDX = IS_ODD_R2 ? (s - 1) : s;
+
+        bfsr_core #(
+            .N_FFT(N_FFT >> (IS_ODD_R2 ? 1 : 0)),
+            .STAGE(R4_STAGE_IDX),
+            .DATA_WIDTH(DATA_WIDTH)
+        ) u_sr_stage (
+            .clk      (clk),
+            .rst_n    (rst_n),
+            .in_valid (stg_in_valid),
+            .in_data  (stg_in_data),
+            .out_valid(stg_out_valid),
+            .out_data (stg_out_data)
+        );
       end
 
-      // MSB of the stage counter toggles load (0) vs calc (1) for this stage's block size
-      assign stage_sdf_mode = stage_cnt[$clog2(STAGE_BLOCK)-1];
-
-      logic [$clog2(FFT_SIZE)-1:0] tw_addr1, tw_addr2;
-      cmplx_t tw_w1, tw_w3;
-      logic   stage_out_vld;
-      cmplx_t stage_out_data;
-
-      // Twiddle Address Generator per stage
-      twiddle_addr_gen #(
-          .FFT_SIZE(FFT_SIZE)
-      ) u_twiddle_addr (
-          .clk(clk),
-          .rst_n(rst_n),
-          .enable(stage_vld[s]),
-          .clear(1'b0),  // Let the self-sync counter handle wrapping naturally
-          .stage_sel(s[$clog2(FFT_SIZE)-1:0]),
-          .addr1(tw_addr1),
-          .addr2(tw_addr2)
-      );
-
-      // Twiddle ROM per stage
-      twiddle_rom #(
-          .FFT_SIZE (FFT_SIZE),
-          .WIDTH    (DATA_WIDTH),
-          .FRAC_BITS(FRAC_BITS)
-      ) u_twiddle_rom (
-          .clk  (clk),
-          .rst_n(rst_n),
-          .addr1(tw_addr1),
-          .addr2(tw_addr2),
-          .w1   (tw_w1),
-          .w3   (tw_w3)
-      );
-
-      // SDF Stage Instance
-      sdf_stage #(
-          .STAGE_DEPTH(STAGE_DELAY > 0 ? STAGE_DELAY : 1),
-          .HAS_TWIDDLE(s == STAGE_COUNT - 1 ? 1'b0 : 1'b1),
-          .SCALE(1'b1)
-      ) u_sdf_stage (
-          .clk      (clk),
-          .rst_n    (rst_n),
-          .valid_in (stage_vld[s]),
-          .data_in  (stage_data[s]),
-          .sdf_mode (stage_sdf_mode),
-          .tw_w     (tw_w1),
-          .valid_out(stage_out_vld),
-          .data_out (stage_out_data)
-      );
-
-      assign stage_vld[s+1]  = stage_out_vld;
-      assign stage_data[s+1] = stage_out_data;
+      assign stage_valid_flat[s+1] = stg_out_valid;
+      assign stage_data_flat[(s+1)*(2*DATA_WIDTH)+:(2*DATA_WIDTH)] = stg_out_data;
     end
   endgenerate
 
   // ------------------------------------------------------------------------
-  // Reorder Buffer Integration
+  // Pipeline Alignment & Reorder Buffer Integration
   // ------------------------------------------------------------------------
-  logic   reorder_wr_valid;
-  cmplx_t reorder_wr_data;
+  logic   pipe_valid;
+  cmplx_t pipe_data;
+  logic   delayed_valid;
 
-  assign reorder_wr_valid = stage_vld[STAGE_COUNT];
-  assign reorder_wr_data  = stage_data[STAGE_COUNT];
+  // Total latency pipeline depth adjusted for Split-Radix delay stages
+  localparam int TOTAL_LATENCY = (N_FFT - 1) + (STG_LATENCY * NUM_STAGES);
 
-  logic   reorder_rd_valid;
-  cmplx_t reorder_rd_data;
+  delay_buffer #(
+      .DEPTH(TOTAL_LATENCY),
+      .DATA_WIDTH(1)
+  ) u_valid_delay (
+      .clk   (clk),
+      .rst_n (rst_n),
+      .enable(1'b1),
+      .din   (in_valid),
+      .dout  (delayed_valid)
+  );
 
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      pipe_valid <= 1'b0;
+      pipe_data  <= '0;
+    end else begin
+      pipe_valid <= delayed_valid;
+      pipe_data  <= stage_data_flat[NUM_STAGES*(2*DATA_WIDTH)+:(2*DATA_WIDTH)];
+    end
+  end
+
+  // Reorder buffer handles bit-reversal mapping for Split-Radix output indexing
   reorder_buffer #(
-      .FFT_SIZE  (FFT_SIZE),
+      .FFT_SIZE  (N_FFT),
       .DATA_WIDTH(DATA_WIDTH)
   ) u_reorder_buffer (
       .clk     (clk),
       .rst_n   (rst_n),
-      .wr_valid(reorder_wr_valid),
-      .wr_data (reorder_wr_data),
-      .rd_ready(m_axis_tready),
-      .rd_valid(reorder_rd_valid),
-      .rd_data (reorder_rd_data)
+      .wr_valid(pipe_valid),
+      .wr_data (pipe_data),
+      .rd_ready(1'b1),
+      .rd_valid(out_valid),
+      .rd_data (out_data)
   );
-
-  // Drive Master AXI4-Stream outputs
-  assign m_axis_tvalid = reorder_rd_valid;
-  assign m_axis_tdata  = reorder_rd_data;
-
-  // Generate m_axis_tlast coincident with the final sample (FFT_SIZE - 1) of a frame
-  localparam int ADDR_W = $clog2(FFT_SIZE);
-  logic [ADDR_W-1:0] out_cnt;
-
-  always_ff @(posedge clk) begin
-    if (!rst_n) begin
-      out_cnt      <= '0;
-      m_axis_tlast <= 1'b0;
-    end else begin
-      m_axis_tlast <= 1'b0;
-      if (m_axis_tvalid && m_axis_tready) begin
-        if (out_cnt == FFT_SIZE - 1) begin
-          out_cnt      <= '0;
-          m_axis_tlast <= 1'b1;
-        end else begin
-          out_cnt <= out_cnt + 1'b1;
-        end
-      end
-    end
-  end
 
 endmodule
