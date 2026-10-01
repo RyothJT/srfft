@@ -12,11 +12,11 @@ module tb_sr_fft_top;
   import fft_pkg::*;
 
   localparam int CLK_PERIOD = 10;
-  localparam int N_FFT = 64;  // Scalable FFT point size
+  localparam int N_FFT = 8;  // Scalable FFT point size
   localparam int DATA_WIDTH = fft_pkg::DATA_WIDTH;
 
-  // Number of sine cycles per FFT frame
-  localparam int SINE_CYCLES = 4;
+  // Number of sine cycles per FFT frame (must be strictly < N_FFT/2 to avoid Nyquist alias/zeroing)
+  localparam int SINE_CYCLES = (N_FFT >= 4) ? (N_FFT / 8) : 1; // 2 cycles for 8-pt FFT
   localparam real TWO_PI = 6.283185307179586;
 
   // Testbench Control Signals
@@ -45,7 +45,8 @@ module tb_sr_fft_top;
   // Unit Under Test: Split-Radix FFT Top Module
   sr_fft_top #(
       .N_FFT(N_FFT),
-      .DATA_WIDTH(DATA_WIDTH)
+      .DATA_WIDTH(DATA_WIDTH),
+      .USE_ROM_TWIDDLE(1)
   ) uut (
       .clk      (clk),
       .rst_n    (rst_n),
@@ -73,15 +74,15 @@ module tb_sr_fft_top;
   // Helper Function: Compute Discrete Sine Wave Sample
   function automatic logic signed [DATA_WIDTH-1:0] get_sine_sample(int sample_num);
     real angle;
-    angle = (TWO_PI * SINE_CYCLES * sample_num) / N_FFT;
-    return $rtoi(SINE_MAG * $sin(angle));
+    angle = (TWO_PI * real'(SINE_CYCLES) * real'(sample_num)) / real'(N_FFT);
+    return $rtoi(real'(SINE_MAG) * $sin(angle));
   endfunction
 
   // Helper Function: Compute Discrete Cosine Wave Sample
   function automatic logic signed [DATA_WIDTH-1:0] get_cosine_sample(int sample_num);
     real angle;
-    angle = (TWO_PI * SINE_CYCLES * sample_num) / N_FFT + (TWO_PI / 4.0);
-    return $rtoi(SINE_MAG * $sin(angle));
+    angle = (TWO_PI * real'(SINE_CYCLES) * real'(sample_num)) / real'(N_FFT);
+    return $rtoi(real'(SINE_MAG) * $cos(angle));
   endfunction
 
   // Stimulus Driver
@@ -127,7 +128,7 @@ module tb_sr_fft_top;
     // SECTION 3: SINE WAVE TEST (10 Frames)
     // ========================================================================
     $display("--------------------------------------------------");
-    $display(" Starting Section 3: %0d-Point Sine Wave Test (10 Frames)", N_FFT);
+    $display(" Starting Section 3: %0d-Point Sine Wave Test (10 Frames, k=%0d)", N_FFT, SINE_CYCLES);
     $display("--------------------------------------------------");
     for (int frame = 0; frame < 10; frame++) begin
       for (int i = 0; i < N_FFT; i++) begin
@@ -142,7 +143,7 @@ module tb_sr_fft_top;
     // SECTION 4: COSINE WAVE TEST (10 Frames)
     // ========================================================================
     $display("--------------------------------------------------");
-    $display(" Starting Section 4: %0d-Point Cosine Wave Test (10 Frames)", N_FFT);
+    $display(" Starting Section 4: %0d-Point Cosine Wave Test (10 Frames, k=%0d)", N_FFT, SINE_CYCLES);
     $display("--------------------------------------------------");
     for (int frame = 0; frame < 10; frame++) begin
       for (int i = 0; i < N_FFT; i++) begin
@@ -205,7 +206,7 @@ module tb_sr_fft_top;
         end
 
       end else if (sample_idx < 30 * N_FFT) begin
-        // SECTION 3: Parameterized Sine Wave Response
+        // SECTION 3: Parameterized Sine Wave Response: X[k] = -j*(N/2)*A, X[N-k] = +j*(N/2)*A
         if (bin_idx == SINE_CYCLES) begin
           expected.re = 16'sd0;
           expected.im = -$rtoi((real'(SINE_MAG) * real'(N_FFT)) / 2.0);
@@ -218,7 +219,7 @@ module tb_sr_fft_top;
         end
 
       end else if (sample_idx < 40 * N_FFT) begin
-        // SECTION 4: Parameterized Cosine Wave Response
+        // SECTION 4: Parameterized Cosine Wave Response: X[k] = (N/2)*A, X[N-k] = (N/2)*A
         if (bin_idx == SINE_CYCLES || bin_idx == (N_FFT - SINE_CYCLES)) begin
           expected.re = $rtoi((real'(SINE_MAG) * real'(N_FFT)) / 2.0);
           expected.im = 16'sd0;

@@ -109,16 +109,16 @@ module bf2_core #(
   // ----------------------------------------------------------------
   cmplx_t twiddle_baseline;
 
-  // always_comb begin
-  //   int  k;
-  //   real angle;
+  always_comb begin
+    int  k;
+    real angle;
 
-  //   k = (stg_cnt & (DELAY - 1)) * (1 << STAGE);
-  //   angle = -TWO_PI * real'(k) / real'(N_FFT);
+    k = (stg_cnt & (DELAY - 1)) * (1 << STAGE);
+    angle = -TWO_PI * real'(k) / real'(N_FFT);
 
-  //   twiddle_baseline.re = $rtoi($cos(angle) * 32767.0);
-  //   twiddle_baseline.im = $rtoi($sin(angle) * 32767.0);
-  // end
+    twiddle_baseline.re = $rtoi($cos(angle) * 32767.0);
+    twiddle_baseline.im = $rtoi($sin(angle) * 32767.0);
+  end
 
   // ----------------------------------------------------------------
   // Method 2: ROM-Based Twiddle Factor Generation
