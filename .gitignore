@@ -1,6 +1,8 @@
 # ==========================================
 # Vivado Build Artifacts & Project Directories
 # ==========================================
+old/*
+
 build/
 *.runs/
 *.sim/

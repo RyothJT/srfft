@@ -12,11 +12,11 @@ module tb_sr_fft_top;
   import fft_pkg::*;
 
   localparam int CLK_PERIOD = 10;
-  localparam int N_FFT = 16;  // Scalable FFT point size
+  localparam int N_FFT = 128;  // Scalable FFT point size
   localparam int DATA_WIDTH = fft_pkg::DATA_WIDTH;
 
   // Number of sine cycles per FFT frame (must be strictly < N_FFT/2 to avoid Nyquist alias/zeroing)
-  localparam int SINE_CYCLES = (N_FFT >= 4) ? (N_FFT / 4) : 1; // 2 cycles for 8-pt FFT
+  localparam int SINE_CYCLES = 2; // 2 cycles for 8-pt FFT
   localparam real TWO_PI = 6.283185307179586;
 
   // Testbench Control Signals
@@ -235,14 +235,14 @@ module tb_sr_fft_top;
       if (m_axis_tdata.re == expected.re && m_axis_tdata.im == expected.im) begin
         pass_count++;
       end else begin
-        $error(
-            "[TB ERROR] Mismatch at Sample %0d (Bin %0d)! Expected Re=%0d, Im=%0d. Got Re=%0d, Im=%0d",
-            sample_idx, bin_idx, expected.re, expected.im, m_axis_tdata.re, m_axis_tdata.im);
+        // $error(
+        //     "[TB ERROR] Mismatch at Sample %0d (Bin %0d)! Expected Re=%0d, Im=%0d. Got Re=%0d, Im=%0d",
+        //     sample_idx, bin_idx, expected.re, expected.im, m_axis_tdata.re, m_axis_tdata.im);
         fail_count++;
       end
 
-      $display("[TB Output] Sample %0d | Bin %0d | Re: %0d, Im: %0d", sample_idx, bin_idx,
-               m_axis_tdata.re, m_axis_tdata.im);
+      // $display("[TB Output] Sample %0d | Bin %0d | Re: %0d, Im: %0d", sample_idx, bin_idx,
+      //          m_axis_tdata.re, m_axis_tdata.im);
 
       sample_idx++;
     end

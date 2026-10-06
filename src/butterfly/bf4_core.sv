@@ -149,24 +149,24 @@ module bf4_core #(
   // ----------------------------------------------------------------
   cmplx_t twiddle_baseline;
 
-  always_comb begin
-    int k, sub_idx;
-    real angle;
+  // always_comb begin
+  //   int k, sub_idx;
+  //   real angle;
 
-    case (state)
-      2'b10:   sub_idx = 1;  // S1 exiting D3 during state 10
-      2'b01:   sub_idx = 2;  // S2 exiting D3 during state 01
-      2'b00:   sub_idx = 3;  // S3 exiting D3 during state 00
-      default: sub_idx = 0;
-    endcase
+  //   case (state)
+  //     2'b10:   sub_idx = 1;  // S1 exiting D3 during state 10
+  //     2'b01:   sub_idx = 2;  // S2 exiting D3 during state 01
+  //     2'b00:   sub_idx = 3;  // S3 exiting D3 during state 00
+  //     default: sub_idx = 0;
+  //   endcase
 
-    // k index cycles over the stage-local frame duration (DELAY)
-    k = (stg_cnt & (DELAY - 1)) * sub_idx * (1 << (2 * STAGE));
-    angle = -TWO_PI * real'(k) / real'(N_FFT);
+  //   // k index cycles over the stage-local frame duration (DELAY)
+  //   k = (stg_cnt & (DELAY - 1)) * sub_idx * (1 << (2 * STAGE));
+  //   angle = -TWO_PI * real'(k) / real'(N_FFT);
 
-    twiddle_baseline.re = $rtoi($cos(angle) * 32767.0);
-    twiddle_baseline.im = $rtoi($sin(angle) * 32767.0);
-  end
+  //   twiddle_baseline.re = $rtoi($cos(angle) * 32767.0);
+  //   twiddle_baseline.im = $rtoi($sin(angle) * 32767.0);
+  // end
 
   // ----------------------------------------------------------------
   // Method 2: ROM-Based Twiddle Factor Generation (R4 Lookahead)

@@ -41,12 +41,12 @@ module twiddle_rom #(
       cos_val = $cos(angle) * max_val;
       sin_val = $sin(angle) * max_val;
 
-      // Symmetric rounding & clamping to Q1.15 [-32767, +32767] range
-      if (cos_val >= 0.0) cos_rom[i] = WIDTH'($rtoi(cos_val + 0.5));
-      else cos_rom[i] = WIDTH'($rtoi(cos_val - 0.5));
+      // Symmetric rounding & clamping using standard SystemVerilog real-to-int cast
+      if (cos_val >= 0.0) cos_rom[i] = WIDTH'(int'(cos_val + 0.5));
+      else cos_rom[i] = WIDTH'(int'(cos_val - 0.5));
 
-      if (sin_val >= 0.0) sin_rom[i] = WIDTH'($rtoi(sin_val + 0.5));
-      else sin_rom[i] = WIDTH'($rtoi(sin_val - 0.5));
+      if (sin_val >= 0.0) sin_rom[i] = WIDTH'(int'(sin_val + 0.5));
+      else sin_rom[i] = WIDTH'(int'(sin_val - 0.5));
     end
   end
 
