@@ -55,4 +55,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+*.dir-locals.el
+logs
 *~
