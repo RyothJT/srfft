@@ -1,7 +1,6 @@
 // ============================================================================
 // File:        reorder_buffer.sv
 // Description: Bit-reversal / output reorder memory buffer for FFT.
-//              Optimized for true FPGA Block RAM (RAMB18E1/RAMB36E1) inference.
 // ============================================================================
 
 `timescale 1ns / 1ps
@@ -24,11 +23,8 @@ module reorder_buffer #(
     output cmplx_t rd_data
 );
 
-  localparam int ADDR_W = $clog2(FFT_SIZE);
-
-  // Force Vivado to infer dedicated Block RAM
-  (* ram_style = "block" *) cmplx_t mem_0 [0:FFT_SIZE-1];
-  (* ram_style = "block" *) cmplx_t mem_1 [0:FFT_SIZE-1];
+  localparam int ADDR_W   = $clog2(FFT_SIZE);
+  localparam int WORD_BIT = $bits(cmplx_t); // Usually 32 bits (16 Real + 16 Imag)
 
   // Bank tracking state
   logic                wr_bank;
@@ -49,16 +45,6 @@ module reorder_buffer #(
       end
     end
   endfunction
-
-  // ------------------------------------------------------------------------
-  // Write Port (Pure RAM write with no reset on array)
-  // ------------------------------------------------------------------------
-  always_ff @(posedge clk) begin
-    if (wr_valid) begin
-      if (wr_bank == 1'b0) mem_0[wr_ptr] <= wr_data;
-      else                 mem_1[wr_ptr] <= wr_data;
-    end
-  end
 
   // Write control logic
   always_ff @(posedge clk or negedge rst_n) begin
@@ -87,22 +73,66 @@ module reorder_buffer #(
     end
   end
 
-  // ------------------------------------------------------------------------
-  // Read Port (Dedicated, unreset synchronous read registers for BRAM)
-  // ------------------------------------------------------------------------
+  // Read Port controls
   logic [ADDR_W-1:0] rd_addr_mapped;
   assign rd_addr_mapped = bit_reverse(rd_ptr);
 
   cmplx_t mem_0_dout;
   cmplx_t mem_1_dout;
 
-  // Pure synchronous BRAM read ports (NO RESET on data outputs)
+  // ------------------------------------------------------------------------
+  // Memory Array Implementation Switch
+  // ------------------------------------------------------------------------
+// `ifdef SYNTHESIS
+//   // ASIC Mode: Instantiate TSMC 16nm Dual-Port / 1R1W SRAM Macros
+  
+//   // Bank 0 SRAM
+//   TSMC_SRAM_1024x32_1R1W u_sram_bank_0 (
+//       .CLK    (clk),
+//       // Write Port
+//       .WEN    (~(wr_valid && (wr_bank == 1'b0))), // Active-low enable
+//       .WADDR  (wr_ptr),
+//       .D      (wr_data),
+//       // Read Port
+//       .REN    (1'b0),                             // Active-low chip enable
+//       .RADDR  (rd_addr_mapped),
+//       .Q      (mem_0_dout)
+//   );
+
+//   // Bank 1 SRAM
+//   TSMC_SRAM_1024x32_1R1W u_sram_bank_1 (
+//       .CLK    (clk),
+//       // Write Port
+//       .WEN    (~(wr_valid && (wr_bank == 1'b1))), // Active-low enable
+//       .WADDR  (wr_ptr),
+//       .D      (wr_data),
+//       // Read Port
+//       .REN    (1'b0),                             // Active-low chip enable
+//       .RADDR  (rd_addr_mapped),
+//       .Q      (mem_1_dout)
+//   );
+
+// `else
+  // Simulation / FPGA Mode: Behavioral 2D Array
+  (* ram_style = "block" *) cmplx_t mem_0 [0:FFT_SIZE-1];
+  (* ram_style = "block" *) cmplx_t mem_1 [0:FFT_SIZE-1];
+
+  always_ff @(posedge clk) begin
+    if (wr_valid) begin
+      if (wr_bank == 1'b0) mem_0[wr_ptr] <= wr_data;
+      else                 mem_1[wr_ptr] <= wr_data;
+    end
+  end
+
   always_ff @(posedge clk) begin
     mem_0_dout <= mem_0[rd_addr_mapped];
     mem_1_dout <= mem_1[rd_addr_mapped];
   end
+// `endif
 
-  // Pipeline control signals by 1 cycle to align with BRAM read latency
+  // ------------------------------------------------------------------------
+  // Pipeline control signals
+  // ------------------------------------------------------------------------
   logic rd_bank_d1;
   logic rd_valid_d1;
   logic current_bank_ready;
@@ -132,7 +162,7 @@ module reorder_buffer #(
     end
   end
 
-  // Output multiplexer outside of the BRAM primitives
+  // Output multiplexer outside of memory blocks
   assign rd_valid = rd_valid_d1;
   assign rd_data  = (rd_bank_d1 == 1'b0) ? mem_0_dout : mem_1_dout;
 
