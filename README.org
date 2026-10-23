@@ -8,73 +8,99 @@ An area-efficient, high-throughput Split-Radix FFT (SR-FFT) processor implemente
 * File Structure
 
 #+begin_src text
-  split_radix_fft/
+split_radix_fft/
     README.org
-    Makefile                    # Root Makefile for build orchestration
-    scripts/
-        run_iv.py               # Unified simulator runner (Icarus / Vivado xsim + Surfer)
- 
-    src/                        # Synthesizable RTL source files
+    Makefile                      # Root Makefile for build orchestration
+
+    python_sim/                   # Python golden models and simulation scripts
+        r22_sim.py
+        sr16_sim.py
+
+    report/                       # Documentation and project reports
+        troth_report1_ee5327_project.typ
+
+    scripts/                      # Build automation and execution scripts
+        build_bitstream.tcl
+        run_dc.py
+        run_iv.py                 # Unified simulator runner (Icarus / Vivado xsim + Surfer)
+
+    src/                          # Synthesizable RTL source files
         pkg/
-            fft_pkg.sv          # Data types (complex_t), parameters, math functions
-            twiddle_pkg.sv      # Twiddle constants and LUT generation functions
-     
-        math/
-            cmult.sv            # Pipelined complex multiplier (4-mult with rounding & saturation)
-            cadd_sub.sv         # Complex adder/subtractor
-            trivial_rot.sv      # Trivial rotators (x 1, -1, +j, -j) via multiplexers
-     
-        butterfly/
-            bf2_core.sv         # Radix-2 butterfly element
-            bf4_core.sv         # Radix-4 butterfly element
-            sr_butterfly.sv     # Combined Split-Radix (R2/R4) butterfly unit
-     
-        memory/
-            delay_buffer.sv     # Shift register / BRAM-based delay line
-            twiddle_rom.sv      # Quarter-wave symmetric Twiddle ROM
-            reorder_buffer.sv   # Bit-reversal / digit-reversal output buffer
-     
+            fft_pkg.sv            # Data types (complex_t), parameters, math functions
         control/
-            fft_control_fsm.sv  # Main datapath sequencer / stage tracker
-            twiddle_addr_gen.sv # Stage-dependent twiddle address generator
-     
-        split_radix_fft_top.sv  # Top-level FFT processor with AXI4-Stream I/O
- 
-    sim/                        # Verification environment
-        tb/
-            tb_cmult.sv         # Self-checking unit testbench for cmult.sv
-            tb_sr_butterfly.sv  # Unit testbench for the split-radix butterfly unit
-            tb_split_radix_fft.sv # Top-level SystemVerilog testbench
-            clk_rst_gen.sv      # Clock and reset utility module
-     
-        model/                  # Golden reference & verification scripts
-            sr_fft_reference.py # Python golden model (floating & fixed-point)
-            gen_stimulus.py     # Stimulus & twiddle table generator
-            evaluate_sqnr.py    # Output checker and SQNR/EVM calculator
-     
-        vectors/                # Generated input/output test vectors (.hex / .txt)
-            stimulus_in.hex
-            golden_out.hex
-     
-        gen/                    # Auto-generated simulation artifacts (git-ignored)
-            vcd/                # Active and backup waveform files (.vcd)
-            vvp/                # Icarus compiled simulation binaries
-            xsim_work/          # Vivado xsim compilation directories
- 
-    syn/                        # Synthesis constraints and tool scripts
+            fft_control_fsm.sv    # Main datapath sequencer / stage tracker
+            twiddle_addr_gen.sv   # Stage-dependent twiddle address generator
+        math/
+            cadd_sub.sv           # Complex adder/subtractor
+            cmult.sv              # Pipelined complex multiplier (4-mult with rounding & saturation)
+            cmult_32.sv
+            cmult_pda.sv
+            trivial_rot.sv        # Trivial rotators (x 1, -1, +j, -j) via multiplexers
+        memory/
+            delay_buffer.sv       # Shift register / BRAM-based delay line
+            reorder_buffer.sv     # Bit-reversal / digit-reversal output buffer
+            sram_dummy.sv
+            twiddle_rom.sv        # Quarter-wave symmetric Twiddle ROM
+        r2/
+            bf2_core.sv
+            r2_fft_top.sv
+        r22/
+            r22_fft_top.sv
+            r22_stage_pair.sv
+        r4/
+            bf4_core.sv
+            r4_fft_top.sv
+        sr/
+            bfsr_core.sv
+            split_radix_l_cell.sv
+            sr16_core.sv
+            sr8_core.sv
+            sr_fft_top.sv
+
+    sim/                          # Verification environment
+        tb/                       # Unit and top-level testbenches
+            r2/
+                tb_bf2_core.sv
+                tb_r2_fft_top.sv
+            r22/
+                tb_r22_fft_top.sv
+            r4/
+                tb_bf4_core.sv
+                tb_r4_fft_top.sv
+            setup/                # Waveform viewer configuration files (.surf.ron)
+            sr/
+                tb_bfsr_core.sv
+                tb_sr8_fft_top.sv
+                tb_sr_fft_top.sv
+            tb_cadd_sub.sv
+            tb_cmult.sv
+            tb_delay_buffer.sv
+            tb_fft_control_fsm.sv
+            tb_fft_pkg.sv
+            tb_reorder_buffer.sv
+            tb_trivial_rot.sv
+            tb_twiddle_addr_gen.sv
+            tb_twiddle_rom.sv
+        gen/                      # Auto-generated simulation artifacts (git-ignored)
+            vcd/                  # Active and backup waveform files (.vcd)
+            vvp/                  # Icarus compiled simulation binaries (.vvp)
+
+    syn/                          # Synthesis constraints and tool scripts
         constraints/
-            timing.sdc          # Clock constraints and I/O delays
-            vivado_pins.xdc     # FPGA pin and placement constraints (optional)
-     
-        vivado/
-            run_synth.tcl       # Vivado non-project mode synthesis TCL
-            run_impl.tcl        # Vivado place & route TCL
-     
-        dc/
-            synth_dc.tcl        # Synopsys Design Compiler run script
-            .synopsys_dc.setup  # Target library configuration
-     
-        reports/                # Output timing, area, and power reports
+            fft_constraints.tcl
+        fpga/
+            program_basys3.tcl
+            program_spi_flash.tcl
+            remote_build.py
+        gen/
+        logs/
+        xdc/
+            basys3.xdc
+        dc_flow.tcl
+        flow_test.tcl
+
+    tcl/                          # Miscellaneous TCL scripts
+        gen_xadc.tcl
 #+end_src
 
 * Simulation Quickstart
