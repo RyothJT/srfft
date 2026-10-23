@@ -1,3 +1,6 @@
+`timescale 1ns / 1ps
+import fft_pkg::*;
+
 // ============================================================================
 // File: sram_dummy.sv
 // Description: Dummy SRAM for logic synthesis without memory compiler .lib

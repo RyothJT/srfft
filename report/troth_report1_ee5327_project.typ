@@ -60,10 +60,12 @@
 == Standard Radix-2 Implementation
 
 - Streaming vs Ping-pong
+- Image of structure
 
 == Split Radix
 
 - Description of algorithm
+- Image of structure
 
 === Implementation
 
@@ -78,6 +80,7 @@
 
 - Description of algorithm
 - Uses elements of Radix-2 and Radix-4 FFTs to save complex multipliers
+- Image of structure
 
 === Implementation
 
