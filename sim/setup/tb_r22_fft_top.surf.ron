@@ -88,144 +88,6 @@
             ],
         ),
         displayed_items: {
-            (3): Variable((
-                variable_ref: (
-                    path: (
-                        strs: [
-                            "tb_r22_fft_top",
-                        ],
-                        id: Wellen((2)),
-                    ),
-                    name: "s_tdata_im",
-                    id: Wellen((2)),
-                    index: None,
-                ),
-                color: None,
-                background_color: None,
-                display_name: "s_tdata_im [15:0]",
-                display_name_type: Unique,
-                manual_name: None,
-                format: Some("Signed"),
-                field_formats: [],
-                height_scaling_factor: Some(2.0),
-                analog: Some((
-                    settings: (
-                        render_style: Step,
-                        y_axis_scale: Viewport,
-                    ),
-                )),
-            )),
-            (2): Variable((
-                variable_ref: (
-                    path: (
-                        strs: [
-                            "tb_r22_fft_top",
-                        ],
-                        id: Wellen((2)),
-                    ),
-                    name: "m_tdata_re",
-                    id: Wellen((3)),
-                    index: None,
-                ),
-                color: None,
-                background_color: None,
-                display_name: "m_tdata_re [15:0]",
-                display_name_type: Unique,
-                manual_name: None,
-                format: Some("Signed"),
-                field_formats: [],
-                height_scaling_factor: Some(2.0),
-                analog: Some((
-                    settings: (
-                        render_style: Step,
-                        y_axis_scale: Viewport,
-                    ),
-                )),
-            )),
-            (7): Variable((
-                variable_ref: (
-                    path: (
-                        strs: [
-                            "tb_r22_fft_top",
-                            "uut",
-                            "gen_r22_stages[0]",
-                            "u_pair",
-                        ],
-                        id: Wellen((9)),
-                    ),
-                    name: "bf2_out",
-                    id: Wellen((59)),
-                    index: None,
-                ),
-                color: None,
-                background_color: None,
-                display_name: "bf2_out [31:0]",
-                display_name_type: Unique,
-                manual_name: None,
-                format: None,
-                field_formats: [],
-                height_scaling_factor: Some(2.0),
-                analog: Some((
-                    settings: (
-                        render_style: Step,
-                        y_axis_scale: Viewport,
-                    ),
-                )),
-            )),
-            (1): Variable((
-                variable_ref: (
-                    path: (
-                        strs: [
-                            "tb_r22_fft_top",
-                        ],
-                        id: Wellen((2)),
-                    ),
-                    name: "m_tdata_im",
-                    id: Wellen((4)),
-                    index: None,
-                ),
-                color: None,
-                background_color: None,
-                display_name: "m_tdata_im [15:0]",
-                display_name_type: Unique,
-                manual_name: None,
-                format: Some("Signed"),
-                field_formats: [],
-                height_scaling_factor: Some(2.0),
-                analog: Some((
-                    settings: (
-                        render_style: Step,
-                        y_axis_scale: Viewport,
-                    ),
-                )),
-            )),
-            (5): Variable((
-                variable_ref: (
-                    path: (
-                        strs: [
-                            "tb_r22_fft_top",
-                        ],
-                        id: Wellen((2)),
-                    ),
-                    name: "sample_idx",
-                    id: Wellen((24)),
-                    index: None,
-                ),
-                color: None,
-                background_color: None,
-                display_name: "sample_idx [31:0]",
-                display_name_type: Unique,
-                manual_name: None,
-                format: Some("Signed"),
-                field_formats: [],
-                height_scaling_factor: Some(2.0),
-                analog: Some((
-                    settings: (
-                        render_style: Step,
-                        y_axis_scale: Viewport,
-                    ),
-                )),
-            )),
             (8): Variable((
                 variable_ref: (
                     path: (
@@ -235,10 +97,10 @@
                             "gen_r22_stages[0]",
                             "u_pair",
                         ],
-                        id: Wellen((9)),
+                        id: Wellen((13)),
                     ),
                     name: "out_data",
-                    id: Wellen((42)),
+                    id: Wellen((64)),
                     index: None,
                 ),
                 color: None,
@@ -292,10 +154,10 @@
                             "gen_r22_stages[0]",
                             "u_pair",
                         ],
-                        id: Wellen((9)),
+                        id: Wellen((13)),
                     ),
                     name: "bf1_out",
-                    id: Wellen((56)),
+                    id: Wellen((68)),
                     index: None,
                 ),
                 color: None,
@@ -313,22 +175,160 @@
                     ),
                 )),
             )),
+            (5): Variable((
+                variable_ref: (
+                    path: (
+                        strs: [
+                            "tb_r22_fft_top",
+                        ],
+                        id: Wellen((2)),
+                    ),
+                    name: "sample_idx",
+                    id: Wellen((24)),
+                    index: None,
+                ),
+                color: None,
+                background_color: None,
+                display_name: "sample_idx [31:0]",
+                display_name_type: Unique,
+                manual_name: None,
+                format: Some("Signed"),
+                field_formats: [],
+                height_scaling_factor: Some(2.0),
+                analog: Some((
+                    settings: (
+                        render_style: Step,
+                        y_axis_scale: Viewport,
+                    ),
+                )),
+            )),
+            (1): Variable((
+                variable_ref: (
+                    path: (
+                        strs: [
+                            "tb_r22_fft_top",
+                        ],
+                        id: Wellen((2)),
+                    ),
+                    name: "m_tdata_im",
+                    id: Wellen((4)),
+                    index: None,
+                ),
+                color: None,
+                background_color: None,
+                display_name: "m_tdata_im [15:0]",
+                display_name_type: Unique,
+                manual_name: None,
+                format: Some("Signed"),
+                field_formats: [],
+                height_scaling_factor: Some(2.0),
+                analog: Some((
+                    settings: (
+                        render_style: Step,
+                        y_axis_scale: Viewport,
+                    ),
+                )),
+            )),
+            (7): Variable((
+                variable_ref: (
+                    path: (
+                        strs: [
+                            "tb_r22_fft_top",
+                            "uut",
+                            "gen_r22_stages[0]",
+                            "u_pair",
+                        ],
+                        id: Wellen((13)),
+                    ),
+                    name: "bf2_out",
+                    id: Wellen((66)),
+                    index: None,
+                ),
+                color: None,
+                background_color: None,
+                display_name: "bf2_out [31:0]",
+                display_name_type: Unique,
+                manual_name: None,
+                format: None,
+                field_formats: [],
+                height_scaling_factor: Some(2.0),
+                analog: Some((
+                    settings: (
+                        render_style: Step,
+                        y_axis_scale: Viewport,
+                    ),
+                )),
+            )),
+            (2): Variable((
+                variable_ref: (
+                    path: (
+                        strs: [
+                            "tb_r22_fft_top",
+                        ],
+                        id: Wellen((2)),
+                    ),
+                    name: "m_tdata_re",
+                    id: Wellen((3)),
+                    index: None,
+                ),
+                color: None,
+                background_color: None,
+                display_name: "m_tdata_re [15:0]",
+                display_name_type: Unique,
+                manual_name: None,
+                format: Some("Signed"),
+                field_formats: [],
+                height_scaling_factor: Some(2.0),
+                analog: Some((
+                    settings: (
+                        render_style: Step,
+                        y_axis_scale: Viewport,
+                    ),
+                )),
+            )),
+            (3): Variable((
+                variable_ref: (
+                    path: (
+                        strs: [
+                            "tb_r22_fft_top",
+                        ],
+                        id: Wellen((2)),
+                    ),
+                    name: "s_tdata_im",
+                    id: Wellen((2)),
+                    index: None,
+                ),
+                color: None,
+                background_color: None,
+                display_name: "s_tdata_im [15:0]",
+                display_name_type: Unique,
+                manual_name: None,
+                format: Some("Signed"),
+                field_formats: [],
+                height_scaling_factor: Some(2.0),
+                analog: Some((
+                    settings: (
+                        render_style: Step,
+                        y_axis_scale: Viewport,
+                    ),
+                )),
+            )),
         },
         display_item_ref_counter: 8,
         viewports: [
             (
-                curr_left: (-0.2),
-                curr_right: (1.2),
-                target_left: (-0.2),
-                target_right: (1.2),
-                move_start_left: (-0.2),
-                move_start_right: (1.2),
+                curr_left: (-0.12637779564478535),
+                curr_right: (0.8280054227311862),
+                target_left: (0.011091714632659854),
+                target_right: (0.16884989944862036),
+                move_start_left: (0.011091714632659854),
+                move_start_right: (0.16884989944862036),
                 move_duration: None,
                 move_strategy: Instant,
             ),
         ],
         cursor: Some((1, [
-            7415000,
+            59309994,
         ])),
         markers: {},
         focused_item: Some((7)),

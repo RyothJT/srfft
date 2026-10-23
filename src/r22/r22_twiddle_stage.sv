@@ -37,6 +37,9 @@
 //   - CMULT_DELAY   : Latency cycles of the complex multiplier core (`cmult`)
 // ============================================================================
 
+`timescale 1ns / 1ps
+import fft_pkg::*;
+
 module r22_twiddle_stage #(
     parameter int N = 16,
     parameter int DATA_WIDTH = 16,

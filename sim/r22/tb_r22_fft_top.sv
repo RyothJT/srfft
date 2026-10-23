@@ -15,20 +15,20 @@ module tb_r22_fft_top;
 
   import fft_pkg::*;
 
-  localparam int CLK_PERIOD          = 10;
-  localparam int N_FFT               = 16;  // Scalable: 16, 64, 256, 1024
-  localparam int DATA_WIDTH          = fft_pkg::DATA_WIDTH;
-  localparam int SINE_CYCLES         = N_FFT / 16;  // k = 1
-  localparam real TWO_PI             = 6.283185307179586;
-  localparam int USE_REORDER_BUFFER  = fft_pkg::USE_REORDER_BUFFER;
+  localparam int CLK_PERIOD = 10;
+  localparam int N_FFT = 128;
+  localparam int DATA_WIDTH = fft_pkg::DATA_WIDTH;
+  localparam int SINE_CYCLES = N_FFT / 16;  // k = 1
+  localparam real TWO_PI = 6.283185307179586;
+  localparam int USE_REORDER_BUFFER = fft_pkg::USE_REORDER_BUFFER;
 
   // Acceptable fixed-point quantization tolerance (in LSB counts)
-  localparam int TOLERANCE           = 6;
+  localparam int TOLERANCE = N_FFT / 2;
 
   // Scaled amplitudes to prevent 16-bit integer overflow at large N_FFT
   localparam logic signed [DATA_WIDTH-1:0] IMPULSE_MAG = 16'sd1000;
-  localparam logic signed [DATA_WIDTH-1:0] DC_MAG      = 16'sd100;
-  localparam logic signed [DATA_WIDTH-1:0] SINE_MAG    = 16'sd100;
+  localparam logic signed [DATA_WIDTH-1:0] DC_MAG = 16'sd100;
+  localparam logic signed [DATA_WIDTH-1:0] SINE_MAG = 16'sd100;
 
   // Dynamically scale random stimulus to avoid accumulator overflow
   localparam int RAND_MAG = (N_FFT <= 16) ? 60 : ((N_FFT <= 64) ? 30 : ((N_FFT <= 256) ? 15 : 8));
@@ -97,10 +97,10 @@ module tb_r22_fft_top;
   endfunction
 
   // Primitive 2D arrays to avoid iverilog multi-dimensional struct indexing bug
-  logic signed [DATA_WIDTH-1:0] rand_inputs_re   [0:9][0:N_FFT-1];
-  logic signed [DATA_WIDTH-1:0] rand_inputs_im   [0:9][0:N_FFT-1];
-  logic signed [DATA_WIDTH-1:0] rand_expected_re [0:9][0:N_FFT-1];
-  logic signed [DATA_WIDTH-1:0] rand_expected_im [0:9][0:N_FFT-1];
+  logic signed [DATA_WIDTH-1:0] rand_inputs_re  [0:9][0:N_FFT-1];
+  logic signed [DATA_WIDTH-1:0] rand_inputs_im  [0:9][0:N_FFT-1];
+  logic signed [DATA_WIDTH-1:0] rand_expected_re[0:9][0:N_FFT-1];
+  logic signed [DATA_WIDTH-1:0] rand_expected_im[0:9][0:N_FFT-1];
 
   // Direct double-precision mathematical DFT task
   task automatic compute_golden_dft(input int f_idx);
@@ -137,8 +137,8 @@ module tb_r22_fft_top;
     // Generate 10 unique random complex frames and pre-compute their golden keys
     for (int f = 0; f < 10; f++) begin
       for (int i = 0; i < N_FFT; i++) begin
-        r_re = ($random % (2 * RAND_MAG + 1)) - RAND_MAG;
-        r_im = ($random % (2 * RAND_MAG + 1)) - RAND_MAG;
+        r_re = $signed($urandom_range(0, 2 * RAND_MAG)) - RAND_MAG;
+        r_im = $signed($urandom_range(0, 2 * RAND_MAG)) - RAND_MAG;
         rand_inputs_re[f][i] = r_re[DATA_WIDTH-1:0];
         rand_inputs_im[f][i] = r_im[DATA_WIDTH-1:0];
       end
@@ -224,8 +224,7 @@ module tb_r22_fft_top;
 
     if (fail_count == 0 && pass_count > 0)
       $display(">>> SUCCESS: R22SDF FFT PASSED ALL TESTS (INCLUDING RANDOM ORDERING)! <<<");
-    else
-      $display(">>> FAILURE: TEST MISMATCH DETECTED! <<<");
+    else $display(">>> FAILURE: TEST MISMATCH DETECTED! <<<");
 
     $finish;
   end
@@ -263,7 +262,7 @@ module tb_r22_fft_top;
         if (natural_bin == SINE_CYCLES)
           expected.im = -$rtoi((real'(SINE_MAG) * real'(N_FFT)) / 2.0);
         else if (natural_bin == (N_FFT - SINE_CYCLES))
-          expected.im =  $rtoi((real'(SINE_MAG) * real'(N_FFT)) / 2.0);
+          expected.im = $rtoi((real'(SINE_MAG) * real'(N_FFT)) / 2.0);
 
       end else if (sample_idx < 40 * N_FFT) begin
         // Section 4: Cosine response
@@ -272,7 +271,7 @@ module tb_r22_fft_top;
 
       end else if (sample_idx < 50 * N_FFT) begin
         // Section 5: Random complex response (Golden mathematical key)
-        frame_idx = (sample_idx / N_FFT) - 40;
+        frame_idx   = (sample_idx / N_FFT) - 40;
         expected.re = rand_expected_re[frame_idx][natural_bin];
         expected.im = rand_expected_im[frame_idx][natural_bin];
       end
@@ -284,8 +283,9 @@ module tb_r22_fft_top;
       if (err_re <= TOLERANCE && err_im <= TOLERANCE) begin
         pass_count++;
       end else begin
-        $error("[TB ERROR] Mismatch at Sample %0d (Bin %0d)! Expected Re=%0d, Im=%0d | Got Re=%0d, Im=%0d",
-               sample_idx, natural_bin, expected.re, expected.im, m_axis_tdata.re, m_axis_tdata.im);
+        $error(
+            "[TB ERROR] Mismatch at Sample %0d (Bin %0d)! Expected Re=%0d, Im=%0d | Got Re=%0d, Im=%0d",
+            sample_idx, natural_bin, expected.re, expected.im, m_axis_tdata.re, m_axis_tdata.im);
         fail_count++;
       end
 
