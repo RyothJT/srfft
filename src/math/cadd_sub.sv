@@ -83,7 +83,8 @@ module cadd_sub #(
   logic signed [WIDTH-1:0] comb_diff_re, comb_diff_im;
   logic signed [WIDTH-1:0] comb_res_re, comb_res_im;
 
-  always_comb begin
+  // always_comb causes iverilog to throw warnings
+  always @* begin
     comb_sum_re  = process_val(full_sum_re);
     comb_sum_im  = process_val(full_sum_im);
     comb_diff_re = process_val(full_diff_re);

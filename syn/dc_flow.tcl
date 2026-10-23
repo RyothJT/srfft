@@ -53,12 +53,12 @@ if {[file exists ${SRC_DIR}/pkg/fft_pkg.sv]} {
     exit 1
 }
 
-# 2. Analyze the rest of the SystemVerilog RTL source files recursively
-if {[file exists ${SRC_DIR}/top/${DESIGN_NAME}.sv]} {
+# 2. Analyze the SystemVerilog RTL source files recursively
+if {[llength [glob -nocomplain -directory ${SRC_DIR} */${DESIGN_NAME}.sv]] > 0} {
     puts "==> Analyzing RTL hierarchy under ${SRC_DIR}..."
     analyze -autoread -recursive -verbose -rebuild -format sverilog -library WORK ${SRC_DIR}
 } else {
-    puts "==>FATAL: Top module ${SRC_DIR}/top/${DESIGN_NAME}.sv not found! Exiting..."
+    puts "==> FATAL: Top module ${DESIGN_NAME}.sv not found under ${SRC_DIR} subdirectories! Exiting..."
     exit 1
 }
 
@@ -98,99 +98,123 @@ set_dont_touch_network [get_clocks]
 # Operating conditions (adjust as per library PVT corner)
 set_operating_conditions -analysis_type bc_wc -max tt0p8v25c
 
-# ###################################################################
-# # STEP 3: Path Groups & Critical Range Setup
-# ###################################################################
-# group_path -name inputs  -from [all_inputs]
-# group_path -name output  -to   [all_outputs]
-# group_path -name comb    -from [all_inputs] -to [all_outputs]
-# group_path -name reg2reg -from [all_registers -clock_pins] -to [all_registers -data_pins]
+# Check SRAM instances
 
-# set_critical_range 2000 [current_design]
+puts "\n========== PRE-SYNTHESIS SRAM CHECK =========="
 
-# ###################################################################
-# # STEP 4: Compile / Optimization
-# ###################################################################
-# set elapsed_time [expr { ([clock seconds] - $start_time) / 60.0 }]
-# puts [format "##### Running Compile Ultra. Runtime: %.2f mins #####" $elapsed_time]
+set sram_designs [get_designs *sram_dummy*]
+puts "Loaded SRAM-related designs: [sizeof_collection $sram_designs]"
 
-# # Optimize datapath architectures and FSMs
-# set_app_var fsm_auto_inferring true
-# set_app_var fsm_enable_state_minimization true
+# Use instance-name matching for a diagnostic count.
+set sram_cells [get_cells -hierarchical *sram*]
+puts "Cells with SRAM in their instance name: [sizeof_collection $sram_cells]"
 
-# # compile_ultra performs advanced datapath optimization and boundary optimization
-# compile_ultra
+if {[sizeof_collection $sram_cells] > 0} {
+    puts "SRAM-related instances:"
+    foreach_in_collection cell $sram_cells {
+        puts "  [get_object_name $cell]"
+    }
 
-# set elapsed_time [expr { ([clock seconds] - $start_time) / 60.0 }]
-# puts [format "##### Running Incremental Compile. Runtime: %.2f mins #####" $elapsed_time]
+    # Protect matched instances from optimization.
+    set_dont_touch $sram_cells true
+} else {
+    puts "WARNING: No instances matched *sram*."
+    puts "Check report_reference and the elaborated hierarchy."
+}
 
-# compile_ultra -incremental
+###################################################################
+# STEP 3: Path Groups & Critical Range Setup
+###################################################################
+group_path -name inputs  -from [all_inputs]
+group_path -name output  -to   [all_outputs]
+group_path -name comb    -from [all_inputs] -to [all_outputs]
+group_path -name reg2reg -from [all_registers -clock_pins] -to [all_registers -data_pins]
 
-# ###################################################################
-# # STEP 5: Re-group & Name Rules Cleanup
-# ###################################################################
-# group_path -name inputs  -from [all_inputs]
-# group_path -name output  -to   [all_outputs]
-# group_path -name comb    -from [all_inputs] -to [all_outputs]
-# group_path -name reg2reg -from [all_registers -clock_pins] -to [all_registers -data_pins]
+set_critical_range 2000 [current_design]
 
-# define_name_rules standard_names \
-#     -allowed "A-Za-z0-9_\[\]" \
-#     -equal_ports_nets \
-#     -remove_internal_net_bus \
-#     -target_bus_naming_style "%s\[%d\]" \
-#     -add_dummy_nets \
-#     -flatten_multi_dimension_busses
+###################################################################
+# STEP 4: Compile / Optimization
+###################################################################
+set elapsed_time [expr { ([clock seconds] - $start_time) / 60.0 }]
+puts [format "##### Running Compile Ultra. Runtime: %.2f mins #####" $elapsed_time]
 
-# define_name_rules reg_names \
-#     -type cell \
-#     -map {{{"\]", "x"}, {"\[", "x"}}}
+# Optimize datapath architectures and FSMs
+set_app_var fsm_auto_inferring true
+set_app_var fsm_enable_state_minimization true
 
-# change_names -hierarchy -verbose -rules reg_names      > ./logs/change_names_reg.log
-# change_names -hierarchy -verbose -rules standard_names > ./logs/change_names_standard.log
+# compile_ultra performs advanced datapath optimization and boundary optimization
+compile_ultra
 
-# ###################################################################
-# # STEP 6: Export Netlist, DDC & SDC
-# ###################################################################
-# set elapsed_time [expr { ([clock seconds] - $start_time) / 60.0 }]
-# puts [format "##### Writing Outputs and Reports. Runtime: %.2f mins #####" $elapsed_time]
+set elapsed_time [expr { ([clock seconds] - $start_time) / 60.0 }]
+puts [format "##### Running Incremental Compile. Runtime: %.2f mins #####" $elapsed_time]
 
-# write_file -format verilog -hierarchy -output ./outputs/${DESIGN_NAME}.vg
-# write_file -format ddc     -hierarchy -output ./outputs/${DESIGN_NAME}.ddc
+compile_ultra -incremental
 
-# set write_sdc_output_lumped_net_capacitance false
-# set write_sdc_output_net_resistance false
-# write_sdc -nosplit ./outputs/${DESIGN_NAME}.sdc
+###################################################################
+# STEP 5: Re-group & Name Rules Cleanup
+###################################################################
+group_path -name inputs  -from [all_inputs]
+group_path -name output  -to   [all_outputs]
+group_path -name comb    -from [all_inputs] -to [all_outputs]
+group_path -name reg2reg -from [all_registers -clock_pins] -to [all_registers -data_pins]
 
-# ###################################################################
-# # STEP 7: Generate Synthesis Reports
-# ###################################################################
-# report_area                                > ./reports/${DESIGN_NAME}.area.rpt
-# report_reference -hierarchy -nosplit       > ./reports/${DESIGN_NAME}.ref.rpt
-# report_qor                                 > ./reports/${DESIGN_NAME}.qor.rpt
-# report_power -hierarchy -verbose -nosplit  > ./reports/${DESIGN_NAME}.power.rpt
-# report_constraint -all_violators -nosplit  > ./reports/${DESIGN_NAME}.constraint.rpt
-# check_design                               > ./reports/${DESIGN_NAME}.check_design.rpt
-# check_timing                               > ./reports/${DESIGN_NAME}.check_timing.rpt
-# report_fsm                                 > ./reports/${DESIGN_NAME}.fsm.rpt
+define_name_rules standard_names \
+    -allowed "A-Za-z0-9_\[\]" \
+    -equal_ports_nets \
+    -remove_internal_net_bus \
+    -target_bus_naming_style "%s\[%d\]" \
+    -add_dummy_nets \
+    -flatten_multi_dimension_busses
 
-# foreach_in_collection group [get_path_groups] {
-#     set group_name [get_object_name $group]
-#     set paths [get_timing_paths -group $group_name]
-#     echo "Found path group: $group_name with [sizeof_collection $paths] paths."
+define_name_rules reg_names \
+    -type cell \
+    -map {{{"\]", "x"}, {"\[", "x"}}}
 
-#     if {[sizeof_collection $paths]} {
-#         redirect -file ./reports/${DESIGN_NAME}.timing.${group_name}.rpt {
-#             report_timing \
-#                 -nosplit \
-#                 -capacitance \
-#                 -transition_time \
-#                 -significant_digits 4 \
-#                 -input_pins -nets -max_paths 1 \
-#                 -group $group_name
-#         }
-#     }
-# }
+change_names -hierarchy -verbose -rules reg_names      > ./logs/change_names_reg.log
+change_names -hierarchy -verbose -rules standard_names > ./logs/change_names_standard.log
 
-# set elapsed_time [expr { ([clock seconds] - $start_time) / 60.0 }]
-# puts [format "##### Done. Runtime: %.2f mins, Memory Used: %.1f GB #####" $elapsed_time [expr [mem] / 1000000.0]]
+###################################################################
+# STEP 6: Export Netlist, DDC & SDC
+###################################################################
+set elapsed_time [expr { ([clock seconds] - $start_time) / 60.0 }]
+puts [format "##### Writing Outputs and Reports. Runtime: %.2f mins #####" $elapsed_time]
+
+write_file -format verilog -hierarchy -output ./outputs/${DESIGN_NAME}.vg
+write_file -format ddc     -hierarchy -output ./outputs/${DESIGN_NAME}.ddc
+
+set write_sdc_output_lumped_net_capacitance false
+set write_sdc_output_net_resistance false
+write_sdc -nosplit ./outputs/${DESIGN_NAME}.sdc
+
+###################################################################
+# STEP 7: Generate Synthesis Reports
+###################################################################
+report_area                                > ./reports/${DESIGN_NAME}.area.rpt
+report_reference -hierarchy -nosplit       > ./reports/${DESIGN_NAME}.ref.rpt
+report_qor                                 > ./reports/${DESIGN_NAME}.qor.rpt
+report_power -hierarchy -verbose -nosplit  > ./reports/${DESIGN_NAME}.power.rpt
+report_constraint -all_violators -nosplit  > ./reports/${DESIGN_NAME}.constraint.rpt
+check_design                               > ./reports/${DESIGN_NAME}.check_design.rpt
+check_timing                               > ./reports/${DESIGN_NAME}.check_timing.rpt
+report_fsm                                 > ./reports/${DESIGN_NAME}.fsm.rpt
+
+foreach_in_collection group [get_path_groups] {
+    set group_name [get_object_name $group]
+    set paths [get_timing_paths -group $group_name]
+    echo "Found path group: $group_name with [sizeof_collection $paths] paths."
+
+    if {[sizeof_collection $paths]} {
+        redirect -file ./reports/${DESIGN_NAME}.timing.${group_name}.rpt {
+            report_timing \
+                -nosplit \
+                -capacitance \
+                -transition_time \
+                -significant_digits 4 \
+                -input_pins -nets -max_paths 1 \
+                -group $group_name
+        }
+    }
+}
+
+set elapsed_time [expr { ([clock seconds] - $start_time) / 60.0 }]
+puts [format "##### Done. Runtime: %.2f mins, Memory Used: %.1f GB #####" $elapsed_time [expr [mem] / 1000000.0]]

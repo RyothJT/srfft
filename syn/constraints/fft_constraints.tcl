@@ -1,6 +1,6 @@
 ###############################################
 # Clock Definition
-create_clock -name CLK -period 1 [get_ports clk]
+create_clock -name CLK -period 1.25 [get_ports clk]
 ###############################################
 ## Input Constraints
 set_driving_cell -lib_cell BUFFD2BWP20P90 -input_transition_rise 0.1 -input_transition_fall 0.1 [all_inputs ]
