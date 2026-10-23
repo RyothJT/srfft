@@ -21,6 +21,7 @@ package fft_pkg;
 
   // Twiddle constant for 45-degree octant rotations: round(1/sqrt(2) * 2^15)
   localparam logic signed [DATA_WIDTH-1:0] C_SQRT2_OVER_2 = 16'sh5A82;  // 23170
+  localparam int                           CMULT_DELAY = 3;
 
   // ========================================================================
   // 2. Packed Complex Data Types (Icarus & Synthesis Compatible)

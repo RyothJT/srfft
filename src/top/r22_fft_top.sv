@@ -7,8 +7,8 @@
 `timescale 1ns / 1ps
 
 module r22_fft_top #(
-    parameter int N_FFT      = 1024,                    // e.g. 16, 64, 256, 1024
-    // parameter int N_FFT      = 64,                    // e.g. 16, 64, 256, 1024
+    // parameter int N_FFT      = 512,                    // e.g. 16, 64, 256, 1024
+    parameter int N_FFT      = 64,                    // e.g. 16, 64, 256, 1024
     parameter int DATA_WIDTH = fft_pkg::DATA_WIDTH
 ) (
     input  logic            clk,
@@ -53,23 +53,23 @@ module r22_fft_top #(
     end
   endgenerate
 
-  // assign out_valid = stage_vld[NUM_PAIRS];
-  // assign out_data  = stage_dat[NUM_PAIRS];
+  assign out_valid = stage_vld[NUM_PAIRS];
+  assign out_data  = stage_dat[NUM_PAIRS];
 
-  // ================================================================
-  // Optional Output Bit-Reversal Reordering Buffer
-  // ================================================================
-  reorder_buffer #(
-      .FFT_SIZE  (N_FFT),
-      .DATA_WIDTH(DATA_WIDTH)
-  ) u_reorder (
-      .clk      (clk),
-      .rst_n    (rst_n),
-      .wr_valid (stage_vld[NUM_PAIRS]),
-      .wr_data  (stage_dat[NUM_PAIRS]),
-      .rd_ready (1'b1),        // Continuously stream out once ready
-      .rd_valid (out_valid),   // Now in natural order 0, 1, 2, ..., N-1
-      .rd_data  (out_data)
-  );
+  // // ================================================================
+  // // Optional Output Bit-Reversal Reordering Buffer
+  // // ================================================================
+  // reorder_buffer #(
+  //     .FFT_SIZE  (N_FFT),
+  //     .DATA_WIDTH(DATA_WIDTH)
+  // ) u_reorder (
+  //     .clk      (clk),
+  //     .rst_n    (rst_n),
+  //     .wr_valid (stage_vld[NUM_PAIRS]),
+  //     .wr_data  (stage_dat[NUM_PAIRS]),
+  //     .rd_ready (1'b1),        // Continuously stream out once ready
+  //     .rd_valid (out_valid),   // Now in natural order 0, 1, 2, ..., N-1
+  //     .rd_data  (out_data)
+  // );
 
 endmodule

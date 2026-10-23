@@ -10,12 +10,12 @@ module reorder_buffer #(
     parameter int FFT_SIZE   = 1024,
     parameter int DATA_WIDTH = fft_pkg::DATA_WIDTH
 ) (
-    input  logic   clk,
-    input  logic   rst_n,
+    input logic clk,
+    input logic rst_n,
 
     // Write Interface (Streaming from FFT Pipeline)
-    input  logic   wr_valid,
-    input  cmplx_t wr_data,
+    input logic   wr_valid,
+    input cmplx_t wr_data,
 
     // Read Interface (Sequential Output)
     input  logic   rd_ready,
@@ -23,17 +23,17 @@ module reorder_buffer #(
     output cmplx_t rd_data
 );
 
-  localparam int ADDR_W   = $clog2(FFT_SIZE);
-  localparam int WORD_BIT = $bits(cmplx_t); // Usually 32 bits (16 Real + 16 Imag)
+  localparam int ADDR_W = $clog2(FFT_SIZE);
+  localparam int WORD_BIT = $bits(cmplx_t);  // Usually 32 bits (16 Real + 16 Imag)
 
   // Bank tracking state
-  logic                wr_bank;
-  logic                rd_bank;
-  logic   [ADDR_W-1:0] wr_ptr;
-  logic   [ADDR_W-1:0] rd_ptr;
+  logic              wr_bank;
+  logic              rd_bank;
+  logic [ADDR_W-1:0] wr_ptr;
+  logic [ADDR_W-1:0] rd_ptr;
 
-  logic                bank_0_ready;
-  logic                bank_1_ready;
+  logic              bank_0_ready;
+  logic              bank_1_ready;
 
   // Bit-reversal calculation function
   function automatic [ADDR_W-1:0] bit_reverse(input [ADDR_W-1:0] in_idx);
@@ -57,7 +57,7 @@ module reorder_buffer #(
       // Clear ready flag when the reader finishes reading that bank
       if (rd_ready && (rd_ptr == FFT_SIZE - 1)) begin
         if (rd_bank == 1'b0) bank_0_ready <= 1'b0;
-        else                 bank_1_ready <= 1'b0;
+        else bank_1_ready <= 1'b0;
       end
 
       if (wr_valid) begin
@@ -65,7 +65,7 @@ module reorder_buffer #(
           wr_ptr  <= '0;
           wr_bank <= ~wr_bank;
           if (wr_bank == 1'b0) bank_0_ready <= 1'b1;
-          else                 bank_1_ready <= 1'b1;
+          else bank_1_ready <= 1'b1;
         end else begin
           wr_ptr <= wr_ptr + 1'b1;
         end
@@ -83,44 +83,44 @@ module reorder_buffer #(
   // ------------------------------------------------------------------------
   // Memory Array Implementation Switch
   // ------------------------------------------------------------------------
-// `ifdef SYNTHESIS
-//   // ASIC Mode: Instantiate TSMC 16nm Dual-Port / 1R1W SRAM Macros
-  
-//   // Bank 0 SRAM
-//   TSMC_SRAM_1024x32_1R1W u_sram_bank_0 (
-//       .CLK    (clk),
-//       // Write Port
-//       .WEN    (~(wr_valid && (wr_bank == 1'b0))), // Active-low enable
-//       .WADDR  (wr_ptr),
-//       .D      (wr_data),
-//       // Read Port
-//       .REN    (1'b0),                             // Active-low chip enable
-//       .RADDR  (rd_addr_mapped),
-//       .Q      (mem_0_dout)
-//   );
+`ifdef SYNTHESIS
+  // Bank 0 SRAM
+  sram_dummy #(
+      .ADDR_WIDTH(ADDR_W),
+      .DATA_WIDTH(WORD_BIT)
+  ) u_sram_bank_0 (
+      .CLK  (clk),
+      .WEN  (~(wr_valid && (wr_bank == 1'b0))),
+      .WADDR(wr_ptr),
+      .D    (wr_data),
+      .REN  (1'b0),
+      .RADDR(rd_addr_mapped),
+      .Q    (mem_0_dout)
+  );
 
-//   // Bank 1 SRAM
-//   TSMC_SRAM_1024x32_1R1W u_sram_bank_1 (
-//       .CLK    (clk),
-//       // Write Port
-//       .WEN    (~(wr_valid && (wr_bank == 1'b1))), // Active-low enable
-//       .WADDR  (wr_ptr),
-//       .D      (wr_data),
-//       // Read Port
-//       .REN    (1'b0),                             // Active-low chip enable
-//       .RADDR  (rd_addr_mapped),
-//       .Q      (mem_1_dout)
-//   );
+  // Bank 1 SRAM
+  sram_dummy #(
+      .ADDR_WIDTH(ADDR_W),
+      .DATA_WIDTH(WORD_BIT)
+  ) u_sram_bank_1 (  // <--- FIXED: changed from u_sram_bank_0 to u_sram_bank_1
+      .CLK  (clk),
+      .WEN  (~(wr_valid && (wr_bank == 1'b1))),
+      .WADDR(wr_ptr),
+      .D    (wr_data),
+      .REN  (1'b0),
+      .RADDR(rd_addr_mapped),
+      .Q    (mem_1_dout)
+  );
 
-// `else
+`else
   // Simulation / FPGA Mode: Behavioral 2D Array
-  (* ram_style = "block" *) cmplx_t mem_0 [0:FFT_SIZE-1];
-  (* ram_style = "block" *) cmplx_t mem_1 [0:FFT_SIZE-1];
+  (* ram_style = "block" *)cmplx_t mem_0[0:FFT_SIZE-1];
+  (* ram_style = "block" *)cmplx_t mem_1[0:FFT_SIZE-1];
 
   always_ff @(posedge clk) begin
     if (wr_valid) begin
       if (wr_bank == 1'b0) mem_0[wr_ptr] <= wr_data;
-      else                 mem_1[wr_ptr] <= wr_data;
+      else mem_1[wr_ptr] <= wr_data;
     end
   end
 
@@ -128,7 +128,7 @@ module reorder_buffer #(
     mem_0_dout <= mem_0[rd_addr_mapped];
     mem_1_dout <= mem_1[rd_addr_mapped];
   end
-// `endif
+`endif
 
   // ------------------------------------------------------------------------
   // Pipeline control signals

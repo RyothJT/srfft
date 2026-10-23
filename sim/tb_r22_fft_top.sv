@@ -11,7 +11,7 @@ module tb_r22_fft_top;
   import fft_pkg::*;
 
   localparam int CLK_PERIOD = 10;
-  localparam int N_FFT = 64;  // Scalable to 16, 64, 256, 1024
+  localparam int N_FFT = 16;  // Scalable to 16, 64, 256, 1024
   localparam int DATA_WIDTH = fft_pkg::DATA_WIDTH;
   localparam int SINE_CYCLES = N_FFT / 16;
   localparam real TWO_PI = 6.283185307179586;

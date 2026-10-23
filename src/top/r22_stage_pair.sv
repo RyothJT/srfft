@@ -10,7 +10,7 @@ import fft_pkg::*;
 module r22_stage_pair #(
     parameter int N             = 16,
     parameter int DATA_WIDTH    = fft_pkg::DATA_WIDTH,
-    parameter bit IS_LAST_STAGE = (N == 4)  // N=4 stage has all twiddles = 1
+    parameter bit IS_LAST_STAGE = (N == 4)              // N=4 stage has all twiddles = 1
 ) (
     input logic clk,
     input logic rst_n,
@@ -43,7 +43,7 @@ module r22_stage_pair #(
   cmplx_t bf1_fifo_in, bf1_fifo_out;
   cmplx_t bf1_out;
 
-  always @* begin
+  always_comb begin
     if (!bf1_sel) begin
       bf1_fifo_in = in_data;
       bf1_out     = bf1_fifo_out;
@@ -110,9 +110,9 @@ module r22_stage_pair #(
 
   // Apply trivial -j rotation: (re + j*im) * (-j) = im - j*re
   cmplx_t bf2_in_rot;
-  always @* begin
+  always_comb begin
     if (bf2_mul_neg_j) begin
-      bf2_in_rot.re =  bf1_out.im;
+      bf2_in_rot.re = bf1_out.im;
       bf2_in_rot.im = -bf1_out.re;
     end else begin
       bf2_in_rot = bf1_out;
@@ -122,7 +122,7 @@ module r22_stage_pair #(
   cmplx_t bf2_fifo_in, bf2_fifo_out;
   cmplx_t bf2_out;
 
-  always @* begin
+  always_comb begin
     if (!bf2_sel) begin
       bf2_fifo_in = bf2_in_rot;
       bf2_out     = bf2_fifo_out;
@@ -181,6 +181,8 @@ module r22_stage_pair #(
       assign out_data  = bf2_out;
 
     end else begin : gen_twiddle_stage
+      localparam int CMULT_DELAY = 3;  // 3 cycles latency for cmult
+
       logic [$clog2(N)-1:0] cnt_tw;
       always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -199,25 +201,20 @@ module r22_stage_pair #(
       logic [$clog2(N)-1:0] rom_addr;
       logic bypass_mult;
 
-      always @* begin
-        case (block)
-          2'b00: begin
-            rom_addr    = '0;
-            bypass_mult = 1'b1;  // W_N^0 = 1.0
-          end
-          2'b01: begin
-            rom_addr    = 2 * k_idx;  // W_N^(2k)
-            bypass_mult = 1'b0;
-          end
-          2'b10: begin
-            rom_addr    = k_idx;      // W_N^k
-            bypass_mult = 1'b0;
-          end
-          2'b11: begin
-            rom_addr    = 3 * k_idx;  // W_N^(3k)
-            bypass_mult = 1'b0;
-          end
-        endcase
+      always_comb begin
+        // Whenever k_idx == 0, W_N^0 = 1.0 for ALL blocks -> bypass multiplier!
+        if ((block == 2'b00) || (k_idx == '0)) begin
+          rom_addr    = '0;
+          bypass_mult = 1'b1;
+        end else begin
+          bypass_mult = 1'b0;
+          case (block)
+            2'b01:   rom_addr = 2 * k_idx;  // W_N^(2k)
+            2'b10:   rom_addr = k_idx;  // W_N^k
+            2'b11:   rom_addr = 3 * k_idx;  // W_N^(3k)
+            default: rom_addr = '0;
+          endcase
+        end
       end
 
       cmplx_t twiddle_w;
@@ -236,7 +233,7 @@ module r22_stage_pair #(
 
       // Register input to align with 1-cycle ROM latency
       cmplx_t bf2_out_d1;
-      logic   bf2_vld_d1, bypass_d1;
+      logic bf2_vld_d1, bypass_d1;
       always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
           bf2_out_d1 <= '0;
@@ -249,11 +246,11 @@ module r22_stage_pair #(
         end
       end
 
-      // Pipelined complex multiplier (3 cycles latency)
+      // Pipelined complex multiplier (3 cycles latency from bf2_out_d1)
       cmplx_t mult_out;
       logic   cmult_vld;
 
-      cmult_pda #(
+      cmult #(
           .WIDTH    (DATA_WIDTH),
           .FRAC_BITS(fft_pkg::FRAC_BITS),
           .SATURATE (1'b1)
@@ -270,38 +267,38 @@ module r22_stage_pair #(
           .p_im     (mult_out.im)
       );
 
-      // 4-cycle delay alignment line for bypassed data (Block 0)
-      cmplx_t bypass_pipe[0:2];
-      logic   bypass_flag_pipe[0:2];
+      // 3-cycle delay alignment line for bypassed data (matches 3-cycle cmult)
+      cmplx_t bypass_pipe[0:CMULT_DELAY-1];
+      logic bypass_flag_pipe[0:CMULT_DELAY-1];
 
       always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-          for (int i = 0; i < 3; i++) begin
+          for (int i = 0; i < CMULT_DELAY; i++) begin
             bypass_pipe[i]      <= '0;
             bypass_flag_pipe[i] <= 1'b0;
           end
         end else begin
           bypass_pipe[0]      <= bf2_out_d1;
           bypass_flag_pipe[0] <= bypass_d1;
-          for (int i = 1; i < 3; i++) begin
+          for (int i = 1; i < CMULT_DELAY; i++) begin
             bypass_pipe[i]      <= bypass_pipe[i-1];
             bypass_flag_pipe[i] <= bypass_flag_pipe[i-1];
           end
         end
       end
 
-      // Output valid tracker (4 cycles)
-      logic [2:0] vld_pipe_mult;
+      // 3-cycle valid tracker (matches 3-cycle cmult)
+      logic [CMULT_DELAY-1:0] vld_pipe_mult;
       always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
           vld_pipe_mult <= '0;
         end else begin
-          vld_pipe_mult <= {vld_pipe_mult[2:0], bf2_vld_d1};
+          vld_pipe_mult <= {vld_pipe_mult[CMULT_DELAY-2:0], bf2_vld_d1};
         end
       end
 
-      assign out_valid = vld_pipe_mult[2];
-      assign out_data  = bypass_flag_pipe[2] ? bypass_pipe[2] : mult_out;
+      assign out_valid = vld_pipe_mult[CMULT_DELAY-1];
+      assign out_data  = bypass_flag_pipe[CMULT_DELAY-1] ? bypass_pipe[CMULT_DELAY-1] : mult_out;
     end
   endgenerate
 
