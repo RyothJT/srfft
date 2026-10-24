@@ -108,8 +108,7 @@ module sr_fft_top #(
   bf4_core #(
       .N_FFT          (4),
       .STAGE          (0),
-      .DATA_WIDTH     (DATA_WIDTH),
-      .USE_ROM_TWIDDLE(USE_ROM_TWIDDLE)
+      .DATA_WIDTH     (DATA_WIDTH)
   ) u_term_bf4_even (
       .clk      (clk),
       .rst_n    (rst_n),
@@ -125,8 +124,7 @@ module sr_fft_top #(
   bf2_core #(
       .N_FFT          (2),
       .STAGE          (0),
-      .DATA_WIDTH     (DATA_WIDTH),
-      .USE_ROM_TWIDDLE(USE_ROM_TWIDDLE)
+      .DATA_WIDTH     (DATA_WIDTH)
   ) u_term_bf2 (
       .clk      (clk),
       .rst_n    (rst_n),
