@@ -7,8 +7,9 @@
 `timescale 1ns / 1ps
 
 module r2_fft_top #(
-    parameter int N_FFT      = 1024,                // FFT point size (power of 2)
-    parameter int DATA_WIDTH = fft_pkg::DATA_WIDTH
+    parameter int N_FFT = 512, // FFT point size (power of 2)
+    parameter int DATA_WIDTH = fft_pkg::DATA_WIDTH,
+    parameter bit USE_REORDER_BUFFER = fft_pkg::USE_REORDER_BUFFER
 ) (
     input logic clk,
     input logic rst_n,
@@ -81,18 +82,27 @@ module r2_fft_top #(
   assign final_valid = stage_valid_flat[STAGES];
   assign final_data  = stage_data_flat[STAGES*(2*DATA_WIDTH)-1-:(2*DATA_WIDTH)];
 
-  // Bit-Reversal Reorder Buffer Instance
-  reorder_buffer #(
-      .FFT_SIZE  (N_FFT),
-      .DATA_WIDTH(DATA_WIDTH)
-  ) u_reorder_buffer (
-      .clk     (clk),
-      .rst_n   (rst_n),
-      .wr_valid(final_valid),
-      .wr_data (final_data),
-      .rd_ready(1'b1),
-      .rd_valid(out_valid),
-      .rd_data (out_data)
-  );
+
+  generate
+    if (USE_REORDER_BUFFER) begin
+      // Bit-Reversal Reorder Buffer Instance
+      reorder_buffer #(
+          .FFT_SIZE  (N_FFT),
+          .DATA_WIDTH(DATA_WIDTH)
+      ) u_reorder_buffer (
+          .clk     (clk),
+          .rst_n   (rst_n),
+          .wr_valid(final_valid),
+          .wr_data (final_data),
+          .rd_ready(1'b1),
+          .rd_valid(out_valid),
+          .rd_data (out_data)
+      );
+    end else begin
+      assign out_valid = final_valid;
+      assign out_data  = final_data;
+    end
+
+  endgenerate
 
 endmodule

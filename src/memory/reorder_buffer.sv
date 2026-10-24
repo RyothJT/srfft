@@ -1,6 +1,6 @@
 // ============================================================================
 // File:        reorder_buffer.sv
-// Description: Bit-reversal / output reorder memory buffer for FFT.
+// Description: Bit-reversal / output reorder memory buffer for FFT (Radix-2/4).
 // ============================================================================
 
 `timescale 1ns / 1ps
@@ -8,7 +8,8 @@ import fft_pkg::*;
 
 module reorder_buffer #(
     parameter int FFT_SIZE   = 1024,
-    parameter int DATA_WIDTH = fft_pkg::DATA_WIDTH
+    parameter int DATA_WIDTH = fft_pkg::DATA_WIDTH,
+    parameter int RADIX      = 2
 ) (
     input logic clk,
     input logic rst_n,
@@ -35,13 +36,19 @@ module reorder_buffer #(
   logic              bank_0_ready;
   logic              bank_1_ready;
 
-  // Bit-reversal calculation function
-  function automatic [ADDR_W-1:0] bit_reverse(input [ADDR_W-1:0] in_idx);
-    int k;
+  // Reorder index calculation function supporting Radix-2 or Radix-4
+  function automatic [ADDR_W-1:0] reorder_addr(input [ADDR_W-1:0] in_idx);
+    int k, i;
     begin
-      bit_reverse = '0;
-      for (k = 0; k < ADDR_W; k = k + 1) begin
-        bit_reverse[ADDR_W-1-k] = in_idx[k];
+      reorder_addr = '0;
+      if (RADIX == 4) begin
+        for (i = 0; i < ADDR_W; i = i + 2) begin
+          reorder_addr[i +: 2] = in_idx[ADDR_W - 2 - i +: 2];
+        end
+      end else begin
+        for (k = 0; k < ADDR_W; k = k + 1) begin
+          reorder_addr[ADDR_W - 1 - k] = in_idx[k];
+        end
       end
     end
   endfunction
@@ -75,7 +82,7 @@ module reorder_buffer #(
 
   // Read Port controls
   logic [ADDR_W-1:0] rd_addr_mapped;
-  assign rd_addr_mapped = bit_reverse(rd_ptr);
+  assign rd_addr_mapped = reorder_addr(rd_ptr);
 
   cmplx_t mem_0_dout;
   cmplx_t mem_1_dout;
@@ -102,7 +109,7 @@ module reorder_buffer #(
   sram_dummy #(
       .ADDR_WIDTH(ADDR_W),
       .DATA_WIDTH(WORD_BIT)
-  ) u_sram_bank_1 (  // <--- FIXED: changed from u_sram_bank_0 to u_sram_bank_1
+  ) u_sram_bank_1 (
       .CLK  (clk),
       .WEN  (~(wr_valid && (wr_bank == 1'b1))),
       .WADDR(wr_ptr),

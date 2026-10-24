@@ -81,22 +81,22 @@ module r4_fft_top #(
   assign final_valid = stage_valid_flat[STAGES];
   assign final_data  = stage_data_flat[STAGES*(2*DATA_WIDTH)-1-:(2*DATA_WIDTH)];
 
-  // assign out_valid = final_valid;
-  // assign out_data = final_data;
+  assign out_valid = final_valid;
+  assign out_data = final_data;
 
-  reorder_buffer #(
-      .FFT_SIZE(N_FFT),
-      .DATA_WIDTH(DATA_WIDTH),
-      .RADIX(4)
-  ) u_reorder_buffer (
-      .clk     (clk),
-      .rst_n   (rst_n),
-      .wr_valid(final_valid),
-      .wr_data (final_data),
-      .rd_ready(1'b1),
-      .rd_valid(reorder_valid),
-      .rd_data (out_data)
-  );
-  assign out_valid = reorder_valid;
+  // reorder_buffer #(
+  //     .FFT_SIZE(N_FFT),
+  //     .DATA_WIDTH(DATA_WIDTH),
+  //     .RADIX(4)
+  // ) u_reorder_buffer (
+  //     .clk     (clk),
+  //     .rst_n   (rst_n),
+  //     .wr_valid(final_valid),
+  //     .wr_data (final_data),
+  //     .rd_ready(1'b1),
+  //     .rd_valid(reorder_valid),
+  //     .rd_data (out_data)
+  // );
+  // assign out_valid = reorder_valid;
 
 endmodule

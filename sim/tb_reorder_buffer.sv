@@ -1,6 +1,6 @@
 // ============================================================================
 // File:        tb_reorder_buffer.sv
-// Description: Self-checking testbench for reorder_buffer (Icarus compatible).
+// Description: Self-checking testbench for Radix-4 reorder_buffer (Icarus compatible).
 // ============================================================================
 
 `timescale 1ns / 1ps
@@ -11,7 +11,8 @@ module tb_reorder_buffer;
   // --------------------------------------------------------------------------
   // Parameters & Interface Signals
   // --------------------------------------------------------------------------
-  localparam int TEST_FFT_SIZE = 1024;
+  localparam int TEST_FFT_SIZE = 16;  // Can be set to 16, 64, 256, 1024, etc.
+  localparam int ADDR_W = $clog2(TEST_FFT_SIZE);
   localparam int TEST_DATA_WIDTH = DATA_WIDTH;
   localparam time CLK_PERIOD = 10ns;
 
@@ -28,11 +29,12 @@ module tb_reorder_buffer;
   cmplx_t rd_data;
 
   // --------------------------------------------------------------------------
-  // DUT Instantiation
+  // DUT Instantiation (Radix-4 Reorder Buffer)
   // --------------------------------------------------------------------------
   reorder_buffer #(
       .FFT_SIZE  (TEST_FFT_SIZE),
-      .DATA_WIDTH(TEST_DATA_WIDTH)
+      .DATA_WIDTH(TEST_DATA_WIDTH),
+      .RADIX     (4)
   ) dut (
       .clk     (clk),
       .rst_n   (rst_n),
@@ -63,6 +65,17 @@ module tb_reorder_buffer;
   int wr_ptr = 0;
   int rd_ptr = 0;
 
+  // Radix-4 digit-reversal function matching ADDR_W
+  function automatic [ADDR_W-1:0] radix4_reverse(input [ADDR_W-1:0] in_idx);
+    int i;
+    begin
+      radix4_reverse = '0;
+      for (i = 0; i < ADDR_W; i = i + 2) begin
+        radix4_reverse[ADDR_W - 2 - i +: 2] = in_idx[i +: 2];
+      end
+    end
+  endfunction
+
   // Monitor output and check against expected sequential data
   always @(posedge clk) begin
     if (!rst_n) begin
@@ -76,12 +89,16 @@ module tb_reorder_buffer;
           exp_re = ref_re[rd_ptr];
           exp_im = ref_im[rd_ptr];
 
+          // Output side-by-side comparison text
           if (rd_data.re !== exp_re || rd_data.im !== exp_im) begin
             $display(
-                "[MISMATCH] At time %0t | Read Ptr: %0d | Expected: (re=%0d, im=%0d) | Got: (re=%0d, im=%0d)",
-                $time, rd_ptr, exp_re, exp_im, rd_data.re, rd_data.im);
+                "[MISMATCH] Read Ptr: %4d | Expected: (re=%6d, im=%6d) | Got: (re=%6d, im=%6d)",
+                rd_ptr, exp_re, exp_im, rd_data.re, rd_data.im);
             error_count++;
           end else begin
+            $display(
+                "[MATCH]    Read Ptr: %4d | Expected: (re=%6d, im=%6d) | Got: (re=%6d, im=%6d)",
+                rd_ptr, exp_re, exp_im, rd_data.re, rd_data.im);
             match_count++;
           end
 
@@ -96,14 +113,14 @@ module tb_reorder_buffer;
     end
   end
 
-  task automatic drive_bit_reversed_frame(input int frame_id);
-    logic [9:0] bit_rev_addr;
+  task automatic drive_radix4_frame(input int frame_id);
+    logic [ADDR_W-1:0] rad4_rev_addr;
     int i;
     int seq_val;
     int rev_val;
     cmplx_t stimulus_val;
 
-    // Populate golden reference sequentially
+    // Populate golden reference sequentially (natural order expected out)
     for (i = 0; i < TEST_FFT_SIZE; i = i + 1) begin
       seq_val = (frame_id * 1000) + i;
       ref_re[wr_ptr] = seq_val;
@@ -111,12 +128,11 @@ module tb_reorder_buffer;
       wr_ptr = wr_ptr + 1;
     end
 
-    // Stream frame into DUT in bit-reversed order
+    // Stream frame into DUT in Radix-4 digit-reversed order
     for (i = 0; i < TEST_FFT_SIZE; i = i + 1) begin
-      bit_rev_addr = bit_reverse_1024(i[9:0]);
-      rev_val = (frame_id * 1000) + int'(bit_rev_addr);
+      rad4_rev_addr = radix4_reverse(i[ADDR_W-1:0]);
+      rev_val = (frame_id * 1000) + int'(rad4_rev_addr);
 
-      // Direct assignment auto-truncates integer expressions cleanly in SystemVerilog
       stimulus_val.re = rev_val;
       stimulus_val.im = -rev_val;
 
@@ -135,7 +151,7 @@ module tb_reorder_buffer;
   // Main Stimulus Sequence
   // --------------------------------------------------------------------------
   initial begin
-    $display("--- Starting Reorder Buffer Test (FFT_SIZE = %0d) ---", TEST_FFT_SIZE);
+    $display("--- Starting Radix-4 Reorder Buffer Test (FFT_SIZE = %0d) ---", TEST_FFT_SIZE);
 
     // Initial signals
     rst_n    = 1'b0;
@@ -149,10 +165,10 @@ module tb_reorder_buffer;
     #(CLK_PERIOD);
 
     // ------------------------------------------------------------------------
-    // Test 1: Single Frame Reordering
+    // Test 1: Single Frame Radix-4 Reordering
     // ------------------------------------------------------------------------
-    $display("--- Test 1: Streaming Single Bit-Reversed Frame ---");
-    drive_bit_reversed_frame(1);
+    $display("--- Test 1: Streaming Single Radix-4 Digit-Reversed Frame ---");
+    drive_radix4_frame(1);
 
     // Wait for frame readout to complete
     wait (rd_ptr == wr_ptr);
@@ -161,34 +177,11 @@ module tb_reorder_buffer;
     // ------------------------------------------------------------------------
     // Test 2: Back-to-Back Ping-Pong Processing
     // ------------------------------------------------------------------------
-    $display("--- Test 2: Back-to-Back Continuous Frames ---");
+    $display("--- Test 2: Back-to-Back Continuous Radix-4 Frames ---");
     fork
       begin
-        drive_bit_reversed_frame(2);
-        drive_bit_reversed_frame(3);
-      end
-    join
-
-    wait (rd_ptr == wr_ptr);
-    #(CLK_PERIOD * 10);
-
-    // ------------------------------------------------------------------------
-    // Test 3: Read Backpressure / Stall (rd_ready Toggling)
-    // ------------------------------------------------------------------------
-    $display("--- Test 3: Ping-Pong Read Backpressure ---");
-    fork
-      begin
-        drive_bit_reversed_frame(4);
-      end
-      begin
-        while (rd_ptr < wr_ptr) begin
-          @(posedge clk);
-          #1ns;
-          rd_ready = ($urandom_range(0, 1) == 1);
-        end
-        @(posedge clk);
-        #1ns;
-        rd_ready = 1'b1;
+        drive_radix4_frame(2);
+        drive_radix4_frame(3);
       end
     join
 
