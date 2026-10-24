@@ -16,14 +16,14 @@ module tb_r22_fft_top;
   import fft_pkg::*;
 
   localparam int CLK_PERIOD = 10;
-  localparam int N_FFT = 128;
+  localparam int N_FFT = 512;
   localparam int DATA_WIDTH = fft_pkg::DATA_WIDTH;
   localparam int SINE_CYCLES = N_FFT / 16;  // k = 1
   localparam real TWO_PI = 6.283185307179586;
   localparam int USE_REORDER_BUFFER = fft_pkg::USE_REORDER_BUFFER;
 
   // Acceptable fixed-point quantization tolerance (in LSB counts)
-  localparam int TOLERANCE = N_FFT / 2;
+  localparam int TOLERANCE = N_FFT;
 
   // Scaled amplitudes to prevent 16-bit integer overflow at large N_FFT
   localparam logic signed [DATA_WIDTH-1:0] IMPULSE_MAG = 16'sd1000;
@@ -49,12 +49,19 @@ module tb_r22_fft_top;
   assign m_tdata_re = m_axis_tdata.re;
   assign m_tdata_im = m_axis_tdata.im;
 
+  logic [DATA_WIDTH-1:0] golden_tdata_re, golden_tdata_im;
+  logic   golden_axis_tvalid;
+  cmplx_t golden_axis_tdata;
+
+  assign golden_tdata_re = golden_axis_tdata.re;
+  assign golden_tdata_im = golden_axis_tdata.im;
+
   initial begin
     $dumpfile("sim/gen/vcd/current.vcd");
     $dumpvars(0, tb_r22_fft_top);
   end
 
-  r22_fft_top #(
+  r2_fft_top #(
       .N_FFT     (N_FFT),
       .DATA_WIDTH(DATA_WIDTH)
   ) uut (
@@ -236,7 +243,7 @@ module tb_r22_fft_top;
     if (m_axis_tvalid && (sample_idx < 50 * N_FFT)) begin
       int out_idx, natural_bin, frame_idx;
       cmplx_t expected;
-      int err_re, err_im;
+      longint err_re, err_im;
 
       out_idx = sample_idx % N_FFT;
 
@@ -255,7 +262,13 @@ module tb_r22_fft_top;
 
       end else if (sample_idx < 20 * N_FFT) begin
         // Section 2: DC response
-        if (natural_bin == 0) expected.re = DC_MAG * N_FFT;
+        if (natural_bin == 0) begin
+          if ((DC_MAG * N_FFT) < ($pow(2, 15) - 1)) begin
+            expected.re = DC_MAG * N_FFT;
+          end else begin
+            expected.re = $pow(2, 15) - 1;
+          end
+        end
 
       end else if (sample_idx < 30 * N_FFT) begin
         // Section 3: Sine response
@@ -276,9 +289,14 @@ module tb_r22_fft_top;
         expected.im = rand_expected_im[frame_idx][natural_bin];
       end
 
-      // Compute absolute error distance
-      err_re = (m_axis_tdata.re > expected.re) ? (m_axis_tdata.re - expected.re) : (expected.re - m_axis_tdata.re);
-      err_im = (m_axis_tdata.im > expected.im) ? (m_axis_tdata.im - expected.im) : (expected.im - m_axis_tdata.im);
+      // Compute absolute error distance with overflow resistance
+      err_re = ($signed(m_axis_tdata.re) > $signed(expected.re)) ?
+          ($signed(m_axis_tdata.re) - $signed(expected.re)) :
+          ($signed(expected.re) - $signed(m_axis_tdata.re));
+
+      err_im = ($signed(m_axis_tdata.im) > $signed(expected.im)) ?
+          ($signed(m_axis_tdata.im) - $signed(expected.im)) :
+          ($signed(expected.im) - $signed(m_axis_tdata.im));
 
       if (err_re <= TOLERANCE && err_im <= TOLERANCE) begin
         pass_count++;

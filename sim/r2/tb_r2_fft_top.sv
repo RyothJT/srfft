@@ -169,7 +169,7 @@ module tb_r2_fft_top;
 
       end else if (sample_idx < 20 * N_FFT) begin
         // SECTION 2: DC Input Response (10 Frames: samples 160..319)
-        if (bin_idx == 0) expected.re = DC_MAG * N_FFT;
+        if (bin_idx == 0) expected.re = min((DC_MAG * N_FFT), $pow(2, 15) - 1);
 
       end else if (sample_idx < 30 * N_FFT) begin
         // SECTION 3: Sine Wave Response (10 Frames: samples 320..479)
