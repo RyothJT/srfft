@@ -6,7 +6,7 @@
 `timescale 1ns / 1ps
 
 module r4_fft_top #(
-    parameter int N_FFT      = 1024,                   // FFT point size (power of 4: 16, 64, 256...)
+    parameter int N_FFT      = 1024,                 // FFT point size (power of 4)
     parameter int DATA_WIDTH = fft_pkg::DATA_WIDTH,
     parameter int PIPELINE   = 1
 ) (
@@ -23,18 +23,21 @@ module r4_fft_top #(
 
   import fft_pkg::*;
 
-  localparam int STAGES_R4 = $clog2(N_FFT) / 2;  // Log4(N_FFT) stages
-  localparam int STG_LATENCY = PIPELINE + 3;
-  localparam int NUM_BOUNDS = STAGES_R4 + 1;
+  localparam int STAGES = $clog2(N_FFT) / 2;  // Log4(N_FFT) stages
+  localparam int NUM_BOUNDS = STAGES + 1;
 
   logic [(NUM_BOUNDS * 2 * DATA_WIDTH)-1 : 0] stage_data_flat;
   logic [                   NUM_BOUNDS-1 : 0] stage_valid_flat;
 
+  // Connect top-level input to internal pipeline tracking
   assign stage_valid_flat[0] = in_valid;
 
   genvar s;
   generate
-    for (s = 0; s < STAGES_R4; s = s + 1) begin : gen_r4_stages
+    for (s = 0; s < STAGES; s = s + 1) begin : gen_stages
+      // ----------------------------------------------------------------
+      // Input Data Selection
+      // ----------------------------------------------------------------
       cmplx_t stg_in_data;
       logic   stg_in_valid;
 
@@ -48,12 +51,14 @@ module r4_fft_top #(
 
       cmplx_t stg_out_data;
 
-      // Radix-4 Butterfly Instance
+      // ----------------------------------------------------------------
+      // Radix-4 Butterfly Core Instance
+      // ----------------------------------------------------------------
       bf4_core #(
           .N_FFT(N_FFT),
           .STAGE(s),
           .DATA_WIDTH(DATA_WIDTH)
-      ) u_bf4_core (
+      ) u_bf2_core (
           .clk      (clk),
           .rst_n    (rst_n),
           .in_valid (stg_in_valid),
@@ -67,44 +72,31 @@ module r4_fft_top #(
   endgenerate
 
   // ------------------------------------------------------------------------
-  // Pipeline Alignment & Reorder Buffer Integration
+  // Direct Pipeline Connection to Reorder Buffer
   // ------------------------------------------------------------------------
-  logic   pipe_valid;
-  cmplx_t pipe_data;
-  logic   delayed_valid;
+  logic final_valid, reorder_valid;
+  cmplx_t final_data;
 
-  delay_buffer #(
-      .DEPTH((N_FFT - 1) + (STG_LATENCY * STAGES_R4)),
-      .DATA_WIDTH(1)
-  ) u_valid_delay (
-      .clk   (clk),
-      .rst_n (rst_n),
-      .enable(1'b1),
-      .din   (in_valid),
-      .dout  (delayed_valid)
-  );
+  // Use the true cycle-accurate valid and data signals from the final stage
+  assign final_valid = stage_valid_flat[STAGES];
+  assign final_data  = stage_data_flat[STAGES*(2*DATA_WIDTH)-1-:(2*DATA_WIDTH)];
 
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      pipe_valid <= 1'b0;
-      pipe_data  <= '0;
-    end else begin
-      pipe_valid <= delayed_valid;
-      pipe_data  <= stage_data_flat[STAGES_R4*(2*DATA_WIDTH)-1-:(2*DATA_WIDTH)];
-    end
-  end
+  // assign out_valid = final_valid;
+  // assign out_data = final_data;
 
   reorder_buffer #(
-      .FFT_SIZE  (N_FFT),
-      .DATA_WIDTH(DATA_WIDTH)
+      .FFT_SIZE(N_FFT),
+      .DATA_WIDTH(DATA_WIDTH),
+      .RADIX(4)
   ) u_reorder_buffer (
       .clk     (clk),
       .rst_n   (rst_n),
-      .wr_valid(pipe_valid),
-      .wr_data (pipe_data),
+      .wr_valid(final_valid),
+      .wr_data (final_data),
       .rd_ready(1'b1),
-      .rd_valid(out_valid),
+      .rd_valid(reorder_valid),
       .rd_data (out_data)
   );
+  assign out_valid = reorder_valid;
 
 endmodule

@@ -29,11 +29,12 @@ module bf4_core #(
 
   import fft_pkg::*;
 
-  localparam int STAGES_R4 = $clog2(N_FFT) / 2;
-  localparam int DELAY = N_FFT >> (2 * (STAGE + 1));  // Stride D = N / 4^(STAGE+1)
+  localparam int STAGES_R4  = $clog2(N_FFT) / 2;
+  localparam int DELAY      = N_FFT >> (2 * (STAGE + 1));  // Stride D = N / 4^(STAGE+1)
   localparam int STAGE_FRAME = 4 * DELAY;  // Local sub-transform frame size
-  localparam int SHIFT_BIT = $clog2(DELAY);  // Local stride bit offset
-  localparam real TWO_PI = 6.283185307179586;
+  localparam int SHIFT_BIT  = $clog2(DELAY);  // Local stride bit offset
+  localparam real TWO_PI    = 6.283185307179586;
+  localparam int TOTAL_PIPE = CMULT_DELAY; // 3 cycles cmult pipeline latency
 
   // ----------------------------------------------------------------
   // Stage Local Sample Counter
@@ -99,7 +100,7 @@ module bf4_core #(
   cmplx_t bf_a, bf_b, bf_c, bf_d;
   cmplx_t sum_0, sum_1, sum_2, sum_3;
 
-  always_comb begin
+  always @* begin
     bf_a = d3_out;  // Oldest sample (delayed by 3*D)
     bf_b = d2_out;  // Delayed by 2*D
     bf_c = d1_out;  // Delayed by 1*D
@@ -144,31 +145,6 @@ module bf4_core #(
   end
 
   // ----------------------------------------------------------------
-  // Method 1: Dynamic Twiddle Factor Generator (Baseline)
-  // Scaled relative to local stage frame indices
-  // ----------------------------------------------------------------
-  cmplx_t twiddle_baseline;
-
-  // always_comb begin
-  //   int k, sub_idx;
-  //   real angle;
-
-  //   case (state)
-  //     2'b10:   sub_idx = 1;  // S1 exiting D3 during state 10
-  //     2'b01:   sub_idx = 2;  // S2 exiting D3 during state 01
-  //     2'b00:   sub_idx = 3;  // S3 exiting D3 during state 00
-  //     default: sub_idx = 0;
-  //   endcase
-
-  //   // k index cycles over the stage-local frame duration (DELAY)
-  //   k = (stg_cnt & (DELAY - 1)) * sub_idx * (1 << (2 * STAGE));
-  //   angle = -TWO_PI * real'(k) / real'(N_FFT);
-
-  //   twiddle_baseline.re = $rtoi($cos(angle) * 32767.0);
-  //   twiddle_baseline.im = $rtoi($sin(angle) * 32767.0);
-  // end
-
-  // ----------------------------------------------------------------
   // Method 2: ROM-Based Twiddle Factor Generation (R4 Lookahead)
   // ----------------------------------------------------------------
   logic [$clog2(N_FFT)-1:0] rom_addr1, rom_addr2;
@@ -200,45 +176,15 @@ module bf4_core #(
   );
 
   // Mux ROM output based on active state sub-index (W^1k, W^2k, W^3k)
-  cmplx_t twiddle_rom_selected;
+  cmplx_t twiddle;
 
   always_comb begin
     case (state)
-      2'b10:   twiddle_rom_selected = twiddle_rom_w1;  // W^1k
-      2'b01:   twiddle_rom_selected = twiddle_rom_w1;  // W^2k calculated by lookahead stride
-      2'b00:   twiddle_rom_selected = twiddle_rom_w3;  // W^3k
-      default: twiddle_rom_selected = twiddle_rom_w1;
+      2'b10:   twiddle = twiddle_rom_w1;  // W^1k
+      2'b01:   twiddle = twiddle_rom_w1;  // W^2k calculated by lookahead stride
+      2'b00:   twiddle = twiddle_rom_w3;  // W^3k
+      default: twiddle = twiddle_rom_w1;
     endcase
-  end
-
-  // ----------------------------------------------------------------
-  // Twiddle Selection Multiplexer
-  // ----------------------------------------------------------------
-  cmplx_t twiddle;
-  wire signed [15:0] diff_re;
-  wire signed [15:0] diff_im;
-  reg signed [31:0] diff_re_sum;
-  reg signed [31:0] diff_im_sum;
-
-  assign diff_re = twiddle_rom_selected.re - twiddle_baseline.re;
-  assign diff_im = twiddle_rom_selected.im - twiddle_baseline.im;
-
-  always_ff @(posedge clk) begin
-    if (!rst_n) begin
-      diff_re_sum <= 0;
-      diff_im_sum <= 0;
-    end else begin
-      diff_re_sum <= diff_re_sum + diff_re;
-      diff_im_sum <= diff_im_sum + diff_im;
-    end
-  end
-
-  always_comb begin
-    if (USE_ROM_TWIDDLE) begin
-      twiddle = twiddle_rom_selected;
-    end else begin
-      twiddle = twiddle_baseline;
-    end
   end
 
   // ----------------------------------------------------------------
@@ -266,13 +212,13 @@ module bf4_core #(
   );
 
   // ----------------------------------------------------------------
-  // Delay Unrotated Sum Path (sum_0) and Control Signals by 3 Cycles
+  // Delay Unrotated Sum Path (sum_0) and Control Signals by TOTAL_PIPE Cycles
   // ----------------------------------------------------------------
   cmplx_t sum_0_delayed;
   logic [1:0] state_delayed;
 
   delay_buffer #(
-      .DEPTH(3),
+      .DEPTH(TOTAL_PIPE),
       .DATA_WIDTH(2 * DATA_WIDTH)
   ) u_sum_delay (
       .clk   (clk),
@@ -283,7 +229,7 @@ module bf4_core #(
   );
 
   delay_buffer #(
-      .DEPTH(3),
+      .DEPTH(TOTAL_PIPE),
       .DATA_WIDTH(2)
   ) u_state_delay (
       .clk   (clk),
@@ -307,15 +253,15 @@ module bf4_core #(
   end
 
   // ----------------------------------------------------------------
-  // Propagate Valid Signal Delayed by 3 Clock Cycles
+  // Propagate Valid Signal Delayed by (3 * DELAY + TOTAL_PIPE) Cycles
   // ----------------------------------------------------------------
   delay_buffer #(
-      .DEPTH(3),
+      .DEPTH(3 * DELAY + TOTAL_PIPE),
       .DATA_WIDTH(1)
   ) u_stg_valid_delay (
       .clk   (clk),
       .rst_n (rst_n),
-      .enable(1'b1),
+      .enable(in_valid),
       .din   (in_valid),
       .dout  (out_valid)
   );
