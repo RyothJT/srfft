@@ -47,8 +47,8 @@ module twiddle_rom #(
       angle = -(2.0 * 3.141592653589793 * real'(i)) / real'(FFT_SIZE);
 
       // Round to nearest integer using true full-scale factor
-      c_int = $rtoi($floor($cos(angle) * scale + 0.5));
-      s_int = $rtoi($floor($sin(angle) * scale + 0.5));
+      c_int = int'($floor($cos(angle) * scale + 0.5));
+      s_int = int'($floor($sin(angle) * scale + 0.5));
 
       // Saturated clamp: prevents +1.0 (32768) from overflowing into -32768 (16'h8000)
       if (c_int > max_val) c_int = max_val;

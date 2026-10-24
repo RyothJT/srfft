@@ -29,10 +29,12 @@ module twiddle_addr_gen #(
   logic [1:0] state_lookahead;
 
   always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n || clear) begin
+    if (!rst_n) begin
       stg_cnt <= '0;
     end else if (enable) begin
-      stg_cnt <= stg_cnt + 1'b1;
+      if (clear) begin
+        stg_cnt <= '0;
+      end else stg_cnt <= stg_cnt + 1'b1;
     end
   end
 
