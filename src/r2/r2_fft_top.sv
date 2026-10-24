@@ -7,7 +7,7 @@
 `timescale 1ns / 1ps
 
 module r2_fft_top #(
-    parameter int N_FFT      = 1024,                  // FFT point size (power of 2)
+    parameter int N_FFT      = 1024,                // FFT point size (power of 2)
     parameter int DATA_WIDTH = fft_pkg::DATA_WIDTH
 ) (
     input logic clk,
@@ -72,34 +72,14 @@ module r2_fft_top #(
   endgenerate
 
   // ------------------------------------------------------------------------
-  // Latency Alignment & Reorder Buffer Integration
-  // Total Pipeline Latency = (N_FFT - 1) + (3 * STAGES)
+  // Direct Pipeline Connection to Reorder Buffer
   // ------------------------------------------------------------------------
-  logic   pipe_valid;
-  cmplx_t pipe_data;
+  logic   final_valid;
+  cmplx_t final_data;
 
-  logic   delayed_valid;
-
-  delay_buffer #(
-      .DEPTH((N_FFT - 1) + (3 * STAGES)),
-      .DATA_WIDTH(1)
-  ) u_valid_delay (
-      .clk   (clk),
-      .rst_n (rst_n),
-      .enable(1'b1),
-      .din   (in_valid),
-      .dout  (delayed_valid)
-  );
-
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      pipe_valid <= 1'b0;
-      pipe_data  <= '0;
-    end else begin
-      pipe_valid <= delayed_valid;
-      pipe_data  <= stage_data_flat[STAGES*(2*DATA_WIDTH)-1-:(2*DATA_WIDTH)];
-    end
-  end
+  // Use the true cycle-accurate valid signal from the final butterfly stage
+  assign final_valid = stage_valid_flat[STAGES];
+  assign final_data  = stage_data_flat[STAGES*(2*DATA_WIDTH)-1-:(2*DATA_WIDTH)];
 
   // Bit-Reversal Reorder Buffer Instance
   reorder_buffer #(
@@ -108,8 +88,8 @@ module r2_fft_top #(
   ) u_reorder_buffer (
       .clk     (clk),
       .rst_n   (rst_n),
-      .wr_valid(pipe_valid),
-      .wr_data (pipe_data),
+      .wr_valid(final_valid),
+      .wr_data (final_data),
       .rd_ready(1'b1),
       .rd_valid(out_valid),
       .rd_data (out_data)

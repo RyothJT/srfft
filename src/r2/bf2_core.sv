@@ -1,41 +1,33 @@
 // ============================================================================
 // File:        bf2_core.sv
-// Description: Radix-2 Single-Path Delay Feedback (SDF) Butterfly Core
-//              Includes Delay Buffer, Commutator Muxing, Complex Adder/Subtractor,
-//              Twiddle Multiplication, and Delay Pipeline Alignment.
+// Description: Fixed Radix-2 Single-Path Delay Feedback (SDF) Butterfly Core
 // ============================================================================
 
 `timescale 1ns / 1ps
+import fft_pkg::*;
 
 module bf2_core #(
-    parameter int N_FFT           = 32,                   // Full FFT point size
-    parameter int STAGE           = 0,                    // Stage index (0 to STAGES-1)
-    parameter int DATA_WIDTH      = fft_pkg::DATA_WIDTH,
-    parameter bit USE_ROM_TWIDDLE = 1'b1                  // 0: Baseline real dynamic, 1: ROM-based
+    parameter int N_FFT      = 32,
+    parameter int STAGE      = 0,
+    parameter int DATA_WIDTH = fft_pkg::DATA_WIDTH
 ) (
-    input logic clk,
-    input logic rst_n,
-    // Input Interface
-    input logic            in_valid,
-    input fft_pkg::cmplx_t in_data,
-
-    // Output Interface
+    input  logic            clk,
+    input  logic            rst_n,
+    input  logic            in_valid,
+    input  fft_pkg::cmplx_t in_data,
     output logic            out_valid,
     output fft_pkg::cmplx_t out_data
 );
 
-  import fft_pkg::*;
-
-  localparam int STAGES = $clog2(N_FFT);
-  localparam int DELAY = N_FFT >> (STAGE + 1);
-  localparam int SHIFT_BIT = STAGES - 1 - STAGE;
-  localparam real TWO_PI = 6.283185307179586;
+  localparam int STAGES     = $clog2(N_FFT);
+  localparam int SHIFT_BIT  = STAGES - 1 - STAGE;
+  localparam int DELAY      = N_FFT >> (STAGE + 1);
+  localparam int TOTAL_PIPE = 1 + CMULT_DELAY; // 1 cycle ROM read + 3 cycles cmult = 4
 
   // ----------------------------------------------------------------
-  // Stage Local Sample Counter (Pipeline-Aligned)
+  // Stage Sample Counter & Commutator Control
   // ----------------------------------------------------------------
   logic [STAGES-1:0] stg_cnt;
-
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       stg_cnt <= '0;
@@ -44,17 +36,16 @@ module bf2_core #(
     end
   end
 
-  cmplx_t delay_in, delay_out;
-  cmplx_t bf_a, bf_b;
-  cmplx_t sum_out, diff_out;
-  logic s_calc, s_calc_delayed;
-
-  // Stage commutator control bit: toggles every DELAY cycles
+  logic s_calc;
   assign s_calc = (stg_cnt >> SHIFT_BIT) & 1'b1;
 
   // ----------------------------------------------------------------
   // Single-Path Delay Feedback Buffer
   // ----------------------------------------------------------------
+  cmplx_t delay_in, delay_out;
+  cmplx_t bf_a, bf_b;
+  cmplx_t sum_out, diff_out;
+
   delay_buffer #(
       .DEPTH(DELAY),
       .DATA_WIDTH(2 * DATA_WIDTH)
@@ -66,8 +57,7 @@ module bf2_core #(
       .dout  (delay_out)
   );
 
-  // SDF Commutator Multiplexer Logic
-  always_comb begin
+  always @* begin
     if (!s_calc) begin
       bf_a     = '0;
       bf_b     = '0;
@@ -75,16 +65,15 @@ module bf2_core #(
     end else begin
       bf_a     = delay_out;
       bf_b     = in_data;
-      delay_in = diff_out;  // Immediate un-rotated difference feedback
+      delay_in = diff_out;
     end
   end
 
-  // Butterfly Complex Adder/Subtractor
   cadd_sub #(
-      .WIDTH(DATA_WIDTH),
+      .WIDTH     (DATA_WIDTH),
       .SCALE_BY_2(1'b0),
-      .SATURATE(1'b1),
-      .PIPELINE(0)
+      .SATURATE  (1'b1),
+      .PIPELINE  (0)
   ) u_addsub (
       .clk      (clk),
       .rst_n    (rst_n),
@@ -104,39 +93,15 @@ module bf2_core #(
   );
 
   // ----------------------------------------------------------------
-  // Method 1: Baseline Dynamic Twiddle Factor Calculation (Preserved)
-  // W_N^k = e^(-j*2*pi*k/N) where k = (stg_cnt % DELAY) * 2^STAGE
+  // Twiddle Generation with Synchronous ROM (1 Cycle Latency)
   // ----------------------------------------------------------------
-  cmplx_t twiddle_baseline;
+  logic [$clog2(N_FFT)-1:0] rom_addr;
+  cmplx_t twiddle_w;
 
-  // always_comb begin
-  //   int  k;
-  //   real angle;
-
-  //   k = (stg_cnt & (DELAY - 1)) * (1 << STAGE);
-  //   angle = -TWO_PI * real'(k) / real'(N_FFT);
-
-  //   twiddle_baseline.re = $rtoi($cos(angle) * 32767.0);
-  //   twiddle_baseline.im = $rtoi($sin(angle) * 32767.0);
-  // end
-
-  // ----------------------------------------------------------------
-  // Method 2: ROM-Based Twiddle Factor Generation
-  // ----------------------------------------------------------------
-  logic [$clog2(N_FFT)-1:0] rom_addr1, rom_addr2;
-  cmplx_t twiddle_rom_w1, twiddle_rom_w3;
-
-  twiddle_addr_gen #(
-      .FFT_SIZE(N_FFT),
-      .STAGE   (STAGE)
-  ) u_twiddle_addr_gen (
-      .clk   (clk),
-      .rst_n (rst_n),
-      .enable(in_valid),
-      .clear (1'b0),
-      .addr1 (rom_addr1),
-      .addr2 (rom_addr2)
-  );
+  // Twiddle address corresponds to k * 2^STAGE during draining (!s_calc)
+  always_comb begin
+    rom_addr = (stg_cnt & (DELAY - 1)) * (1 << STAGE);
+  end
 
   twiddle_rom #(
       .FFT_SIZE (N_FFT),
@@ -145,81 +110,105 @@ module bf2_core #(
   ) u_twiddle_rom (
       .clk  (clk),
       .rst_n(rst_n),
-      .addr1(rom_addr1),
-      .addr2(rom_addr2),
-      .w1   (twiddle_rom_w1),
-      .w3   (twiddle_rom_w3)
+      .addr1(rom_addr),
+      .addr2('0),
+      .w1   (twiddle_w),
+      .w3   ()
   );
 
   // ----------------------------------------------------------------
-  // Twiddle Selection Multiplexer
+  // Match 1-cycle ROM latency on data and control paths
   // ----------------------------------------------------------------
-  cmplx_t twiddle;
+  cmplx_t delay_out_d1;
+  cmplx_t sum_out_d1;
+  logic   s_calc_d1;
+  logic   vld_d1;
 
-  always_comb begin
-    if (USE_ROM_TWIDDLE) begin
-      twiddle = twiddle_rom_w1;
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      delay_out_d1 <= '0;
+      sum_out_d1   <= '0;
+      s_calc_d1    <= 1'b0;
+      vld_d1       <= 1'b0;
     end else begin
-      twiddle = twiddle_baseline;
+      delay_out_d1 <= delay_out;
+      sum_out_d1   <= sum_out;
+      s_calc_d1    <= s_calc;
+      vld_d1       <= in_valid;
     end
   end
 
   // ----------------------------------------------------------------
-  // Complex Multiplier on Delayed Stored Difference Path (3 Cycles)
+  // Complex Multiplier (Latency = CMULT_DELAY = 3)
   // ----------------------------------------------------------------
   cmplx_t twid_mult_out;
   logic   mult_valid;
 
-  cmult #(
-      .WIDTH(DATA_WIDTH),
-      .FRAC_BITS(DATA_WIDTH - 1),
-      .SATURATE(1'b1)
-  ) u_twiddle_mult (
-      .clk      (clk),
-      .rst_n    (rst_n),
-      .valid_in (in_valid),
-      .valid_out(mult_valid),
-      .a_re     (delay_out.re),
-      .a_im     (delay_out.im),
-      .b_re     (twiddle.re),
-      .b_im     (twiddle.im),
-      .p_re     (twid_mult_out.re),
-      .p_im     (twid_mult_out.im)
-  );
+  // Last stage of FFT has twiddle = 1.0 (bypass multiplication)
+  localparam bit IS_TERMINAL_STAGE = (STAGE == STAGES - 1);
+
+  generate
+    if (IS_TERMINAL_STAGE) begin : gen_terminal_bypass
+      delay_buffer #(
+          .DEPTH(CMULT_DELAY),
+          .DATA_WIDTH(2 * DATA_WIDTH)
+      ) u_bypass_mult (
+          .clk   (clk),
+          .rst_n (rst_n),
+          .enable(1'b1),
+          .din   (delay_out_d1),
+          .dout  (twid_mult_out)
+      );
+    end else begin : gen_mult
+      cmult #(
+          .WIDTH    (DATA_WIDTH),
+          .FRAC_BITS(fft_pkg::FRAC_BITS),
+          .SATURATE (1'b1)
+      ) u_twiddle_mult (
+          .clk      (clk),
+          .rst_n    (rst_n),
+          .valid_in (vld_d1),
+          .valid_out(mult_valid),
+          .a_re     (delay_out_d1.re),
+          .a_im     (delay_out_d1.im),
+          .b_re     (twiddle_w.re),
+          .b_im     (twiddle_w.im),
+          .p_re     (twid_mult_out.re),
+          .p_im     (twid_mult_out.im)
+      );
+    end
+  endgenerate
 
   // ----------------------------------------------------------------
-  // Delay Control Signal and Sum Path by 3 Clock Cycles
+  // Delay Sum Path and Control to Match Multiplier (3 Cycles)
   // ----------------------------------------------------------------
   cmplx_t sum_out_delayed;
+  logic   s_calc_delayed;
 
   delay_buffer #(
-      .DEPTH(3),
+      .DEPTH(CMULT_DELAY),
       .DATA_WIDTH(2 * DATA_WIDTH)
   ) u_sum_delay (
       .clk   (clk),
       .rst_n (rst_n),
       .enable(1'b1),
-      .din   (sum_out),
+      .din   (sum_out_d1),
       .dout  (sum_out_delayed)
   );
 
   delay_buffer #(
-      .DEPTH(3),
+      .DEPTH(CMULT_DELAY),
       .DATA_WIDTH(1)
   ) u_scalc_delay (
       .clk   (clk),
       .rst_n (rst_n),
       .enable(1'b1),
-      .din   (s_calc),
+      .din   (s_calc_d1),
       .dout  (s_calc_delayed)
   );
 
-  // ----------------------------------------------------------------
-  // Stage Synchronous Output Mux
-  // s_calc_delayed = 0 -> Output rotated stored difference (twid_mult_out)
-  // s_calc_delayed = 1 -> Output unrotated sum path (sum_out_delayed)
-  // ----------------------------------------------------------------
-  always_comb begin
+  // Synchronous Output Mux: Sum emerges first (s_calc_delayed=1), Difference second (s_calc_delayed=0)
+  always @* begin
     if (!s_calc_delayed) begin
       out_data = twid_mult_out;
     end else begin
@@ -227,16 +216,14 @@ module bf2_core #(
     end
   end
 
-  // ----------------------------------------------------------------
-  // Propagate Valid Signal Delayed by 3 Clock Cycles
-  // ----------------------------------------------------------------
+  // Propagate Valid Delay: exactly DELAY + TOTAL_PIPE cycles
   delay_buffer #(
-      .DEPTH(3),
+      .DEPTH(DELAY + TOTAL_PIPE),
       .DATA_WIDTH(1)
   ) u_stg_valid_delay (
       .clk   (clk),
       .rst_n (rst_n),
-      .enable(1'b1),
+      .enable(in_valid),
       .din   (in_valid),
       .dout  (out_valid)
   );
