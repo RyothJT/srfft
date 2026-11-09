@@ -5,15 +5,17 @@
 //              - Synchronized delay strides (D1, D2, D3)
 //              - Pipeline-aligned multiplier and direct sum paths
 //              - Support for Baseline and ROM-based twiddle generation
+//              - Optimized Last-Stage bypass (omits ROM, multiplier, and pipe delays)
 // ============================================================================
 
 `timescale 1ns / 1ps
 
 module bf4_core #(
-    parameter int N_FFT           = 64,                   // Total FFT size (power of 4)
-    parameter int STAGE           = 0,                    // Stage index (0 to STAGES_R4-1)
+    parameter int N_FFT           = 64,                                 // Total FFT size (power of 4)
+    parameter int STAGE           = 0,                                  // Stage index (0 to STAGES_R4-1)
     parameter int DATA_WIDTH      = fft_pkg::DATA_WIDTH,
-    parameter bit USE_ROM_TWIDDLE = 1'b1                  // 0: Baseline real dynamic, 1: ROM-based
+    parameter bit USE_ROM_TWIDDLE = 1'b1,                               // 0: Baseline real dynamic, 1: ROM-based
+    parameter bit IS_LAST_STAGE   = (STAGE == ($clog2(N_FFT) / 2 - 1))  // 1 if final stage (DELAY == 1)
 ) (
     input logic clk,
     input logic rst_n,
@@ -126,7 +128,7 @@ module bf4_core #(
   // ----------------------------------------------------------------
   // SDF Commutator Input Routing Logic
   // ----------------------------------------------------------------
-  always_comb begin
+  always @* begin
     case (state)
       // States 00, 01, 10: Shift incoming samples into delay line
       2'b00, 2'b01, 2'b10: begin
@@ -145,125 +147,133 @@ module bf4_core #(
   end
 
   // ----------------------------------------------------------------
-  // Method 2: ROM-Based Twiddle Factor Generation (R4 Lookahead)
+  // Structural Generation: Last Stage vs. Intermediate Stage
   // ----------------------------------------------------------------
-  logic [$clog2(N_FFT)-1:0] rom_addr1, rom_addr2;
-  cmplx_t twiddle_rom_w1, twiddle_rom_w3;
+  generate
+    if (IS_LAST_STAGE) begin : gen_last_stage
+      // ----------------------------------------------------------------
+      // Last Stage: All twiddle factors W_4^0 = 1.
+      // Omit Twiddle ROM, Complex Multiplier, and Pipeline Delays.
+      // ----------------------------------------------------------------
+      assign out_data = (state == 2'b11) ? sum_0 : d3_out;
 
-  twiddle_addr_gen #(
-      .FFT_SIZE(N_FFT),
-      .STAGE   (STAGE)
-  ) u_twiddle_addr_gen (
-      .clk   (clk),
-      .rst_n (rst_n),
-      .enable(in_valid),
-      .clear (1'b0),
-      .addr1 (rom_addr1),
-      .addr2 (rom_addr2)
-  );
+      delay_buffer #(
+          .DEPTH(3 * DELAY),
+          .DATA_WIDTH(1)
+      ) u_stg_valid_delay (
+          .clk   (clk),
+          .rst_n (rst_n),
+          .enable(in_valid),
+          .din   (in_valid),
+          .dout  (out_valid)
+      );
 
-  twiddle_rom #(
-      .FFT_SIZE (N_FFT),
-      .WIDTH    (DATA_WIDTH),
-      .FRAC_BITS(fft_pkg::FRAC_BITS)
-  ) u_twiddle_rom (
-      .clk  (clk),
-      .rst_n(rst_n),
-      .addr1(rom_addr1),
-      .addr2(rom_addr2),
-      .w1   (twiddle_rom_w1),
-      .w3   (twiddle_rom_w3)
-  );
+    end else begin : gen_intermediate_stage
+      // ----------------------------------------------------------------
+      // Intermediate Stages: Lookahead ROM + Complex Multiplier + Pipeline
+      // ----------------------------------------------------------------
+      logic [$clog2(N_FFT)-1:0] rom_addr1, rom_addr2;
+      cmplx_t twiddle_rom_w1, twiddle_rom_w3;
 
-  // Mux ROM output based on active state sub-index (W^1k, W^2k, W^3k)
-  cmplx_t twiddle;
+      twiddle_addr_gen #(
+          .FFT_SIZE(N_FFT),
+          .STAGE   (STAGE)
+      ) u_twiddle_addr_gen (
+          .clk   (clk),
+          .rst_n (rst_n),
+          .enable(in_valid),
+          .clear (1'b0),
+          .addr1 (rom_addr1),
+          .addr2 (rom_addr2)
+      );
 
-  always_comb begin
-    case (state)
-      2'b10:   twiddle = twiddle_rom_w1;  // W^1k
-      2'b01:   twiddle = twiddle_rom_w1;  // W^2k calculated by lookahead stride
-      2'b00:   twiddle = twiddle_rom_w3;  // W^3k
-      default: twiddle = twiddle_rom_w1;
-    endcase
-  end
+      twiddle_rom #(
+          .FFT_SIZE (N_FFT),
+          .WIDTH    (DATA_WIDTH),
+          .FRAC_BITS(fft_pkg::FRAC_BITS)
+      ) u_twiddle_rom (
+          .clk  (clk),
+          .rst_n(rst_n),
+          .addr1(rom_addr1),
+          .addr2(rom_addr2),
+          .w1   (twiddle_rom_w1),
+          .w3   (twiddle_rom_w3)
+      );
 
-  // ----------------------------------------------------------------
-  // Complex Multiplier on Delayed Feedback Path (3 Cycles Latency)
-  // Multiplies difference path samples exiting d3_out
-  // ----------------------------------------------------------------
-  cmplx_t twid_mult_out;
-  logic   mult_valid;
+      // Mux ROM output based on active state sub-index (W^1k, W^2k, W^3k)
+      cmplx_t twiddle;
 
-  cmult #(
-      .WIDTH(DATA_WIDTH),
-      .FRAC_BITS(DATA_WIDTH - 1),
-      .SATURATE(1'b1)
-  ) u_twiddle_mult (
-      .clk      (clk),
-      .rst_n    (rst_n),
-      .valid_in (in_valid),
-      .valid_out(mult_valid),
-      .a_re     (d3_out.re),
-      .a_im     (d3_out.im),
-      .b_re     (twiddle.re),
-      .b_im     (twiddle.im),
-      .p_re     (twid_mult_out.re),
-      .p_im     (twid_mult_out.im)
-  );
+      always @* begin
+        case (state)
+          2'b10:   twiddle = twiddle_rom_w1;  // W^1k
+          2'b01:   twiddle = twiddle_rom_w1;  // W^2k calculated by lookahead stride
+          2'b00:   twiddle = twiddle_rom_w3;  // W^3k
+          default: twiddle = twiddle_rom_w1;
+        endcase
+      end
 
-  // ----------------------------------------------------------------
-  // Delay Unrotated Sum Path (sum_0) and Control Signals by TOTAL_PIPE Cycles
-  // ----------------------------------------------------------------
-  cmplx_t sum_0_delayed;
-  logic [1:0] state_delayed;
+      // Complex Multiplier on Delayed Feedback Path (3 Cycles Latency)
+      cmplx_t twid_mult_out;
+      logic   mult_valid;
 
-  delay_buffer #(
-      .DEPTH(TOTAL_PIPE),
-      .DATA_WIDTH(2 * DATA_WIDTH)
-  ) u_sum_delay (
-      .clk   (clk),
-      .rst_n (rst_n),
-      .enable(1'b1),
-      .din   (sum_0),
-      .dout  (sum_0_delayed)
-  );
+      cmult #(
+          .WIDTH(DATA_WIDTH),
+          .FRAC_BITS(DATA_WIDTH - 1),
+          .SATURATE(1'b1)
+      ) u_twiddle_mult (
+          .clk      (clk),
+          .rst_n    (rst_n),
+          .valid_in (in_valid),
+          .valid_out(mult_valid),
+          .a_re     (d3_out.re),
+          .a_im     (d3_out.im),
+          .b_re     (twiddle.re),
+          .b_im     (twiddle.im),
+          .p_re     (twid_mult_out.re),
+          .p_im     (twid_mult_out.im)
+      );
 
-  delay_buffer #(
-      .DEPTH(TOTAL_PIPE),
-      .DATA_WIDTH(2)
-  ) u_state_delay (
-      .clk   (clk),
-      .rst_n (rst_n),
-      .enable(1'b1),
-      .din   (state),
-      .dout  (state_delayed)
-  );
+      // Delay Unrotated Sum Path (sum_0) and Control Signals by TOTAL_PIPE Cycles
+      cmplx_t sum_0_delayed;
+      logic [1:0] state_delayed;
 
-  // ----------------------------------------------------------------
-  // Stage Synchronous Output Mux (Pipeline Aligned)
-  // state_delayed = 11 -> Output unrotated sum_0_delayed
-  // state_delayed = 00, 01, 10 -> Output rotated feedback outputs (twid_mult_out)
-  // ----------------------------------------------------------------
-  always_comb begin
-    if (state_delayed == 2'b11) begin
-      out_data = sum_0_delayed;
-    end else begin
-      out_data = twid_mult_out;
+      delay_buffer #(
+          .DEPTH(TOTAL_PIPE),
+          .DATA_WIDTH(2 * DATA_WIDTH)
+      ) u_sum_delay (
+          .clk   (clk),
+          .rst_n (rst_n),
+          .enable(1'b1),
+          .din   (sum_0),
+          .dout  (sum_0_delayed)
+      );
+
+      delay_buffer #(
+          .DEPTH(TOTAL_PIPE),
+          .DATA_WIDTH(2)
+      ) u_state_delay (
+          .clk   (clk),
+          .rst_n (rst_n),
+          .enable(1'b1),
+          .din   (state),
+          .dout  (state_delayed)
+      );
+
+      // Stage Synchronous Output Mux (Pipeline Aligned)
+      assign out_data = (state_delayed == 2'b11) ? sum_0_delayed : twid_mult_out;
+
+      // Propagate Valid Signal Delayed by (3 * DELAY + TOTAL_PIPE) Cycles
+      delay_buffer #(
+          .DEPTH(3 * DELAY + TOTAL_PIPE),
+          .DATA_WIDTH(1)
+      ) u_stg_valid_delay (
+          .clk   (clk),
+          .rst_n (rst_n),
+          .enable(in_valid),
+          .din   (in_valid),
+          .dout  (out_valid)
+      );
     end
-  end
-
-  // ----------------------------------------------------------------
-  // Propagate Valid Signal Delayed by (3 * DELAY + TOTAL_PIPE) Cycles
-  // ----------------------------------------------------------------
-  delay_buffer #(
-      .DEPTH(3 * DELAY + TOTAL_PIPE),
-      .DATA_WIDTH(1)
-  ) u_stg_valid_delay (
-      .clk   (clk),
-      .rst_n (rst_n),
-      .enable(in_valid),
-      .din   (in_valid),
-      .dout  (out_valid)
-  );
+  endgenerate
 
 endmodule
